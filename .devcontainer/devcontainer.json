@@ -1,6 +1,7 @@
 {
-    "name": "my-project",
+    "name": "Eurofurence Creator System",
     "build": {
-        "dockerfile": "../Dockerfile"
+        "dockerfile": "Dockerfile",
+        "context": ".."
     }
 }
