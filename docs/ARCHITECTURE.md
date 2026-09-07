@@ -39,6 +39,8 @@ Code should be organized by functional area, such as authentication,
 applications, creators, helpers, badges, gallery, and staff operations. The
 exact package structure should follow actual implementation needs.
 
+All timestamps are stored in UTC. Event deadlines are configured using the Europe/Berlin timezone.
+
 ## Technology
 
 | Area | Choice |
