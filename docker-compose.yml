@@ -9,6 +9,23 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
+    networks:
+      - dev
+
+  s3:
+    image: adobe/s3mock:5.2.0
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: creators
+      COM_ADOBE_TESTING_S3MOCK_REGION: us-east-1
+    ports:
+      - "9090:9090"
+    networks:
+      - dev
 
 volumes:
   postgres_data:
+
+networks:
+  dev:
+    name: creators-dev
+    external: true

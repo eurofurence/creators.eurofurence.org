@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     s3_bucket: str | None = None
     s3_access_key_id: str | None = None
     s3_secret_access_key: SecretStr | None = None
+    s3_region: str = "us-east-1"
 
     oidc_issuer_url: str | None = None
     oidc_client_id: str | None = None

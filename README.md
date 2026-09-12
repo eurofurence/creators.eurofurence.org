@@ -6,7 +6,7 @@ Web application for managing Eurofurence Video Creator applications.
 
 The application is intended to run as a containerized service within the Eurofurence infrastructure.
 
-Local development uses a VS Code Dev Container and a PostgreSQL development database provided through Docker Compose.
+Local development uses a VS Code Dev Container with PostgreSQL and an S3-compatible development storage provided through Docker Compose.
 
 ### Prerequisites
 
@@ -26,6 +26,8 @@ Then open the repository in the Dev Container:
 
 Python dependencies from `requirements.txt` are installed automatically when the Dev Container is created.
 
+The PostgreSQL and S3 development services are started automatically when the Dev Container starts.
+
 If dependencies need to be installed manually, run:
 
 ```bash
@@ -42,24 +44,32 @@ cp .env.example .env
 
 The `.env` file contains local configuration and secrets and must not be committed.
 
-For local PostgreSQL development, the database URL should point to the PostgreSQL container exposed through Docker Desktop, for example:
+The default development configuration uses the Docker service names for PostgreSQL and S3:
 
 ```dotenv
-DATABASE_URL="postgresql+psycopg://creators:creators@host.docker.internal:5432/creators"
+DATABASE_URL="postgresql+psycopg://creators:creators@db:5432/creators"
+
+S3_ENDPOINT_URL="http://s3:9090"
+S3_BUCKET="creators"
+S3_ACCESS_KEY_ID="test"
+S3_SECRET_ACCESS_KEY="test"
+S3_REGION="us-east-1"
 ```
 
-### Start PostgreSQL
+### Local services
 
-Start the local PostgreSQL database:
+PostgreSQL and S3Mock are started automatically when the Dev Container starts.
 
-```bash
-docker compose up -d db
-```
-
-Check that the container is running:
+Check that both services are running:
 
 ```bash
 docker compose ps
+```
+
+They can also be started manually if necessary:
+
+```bash
+docker compose up -d
 ```
 
 To verify that PostgreSQL is accepting connections:
@@ -67,6 +77,14 @@ To verify that PostgreSQL is accepting connections:
 ```bash
 docker compose exec db pg_isready -U creators -d creators
 ```
+
+To verify the local S3 connection:
+
+```bash
+curl http://s3:9090
+```
+
+The response should contain the `creators` bucket.
 
 ### Database migrations
 
@@ -95,9 +113,9 @@ The application is then available at:
 * `http://127.0.0.1:8000/health` — health check
 * `http://127.0.0.1:8000/docs` — OpenAPI documentation
 
-### Stop the local database
+### Stop local services
 
-When development is finished, stop the PostgreSQL container:
+When development is finished, stop the PostgreSQL and S3Mock containers:
 
 ```bash
 docker compose down
@@ -105,7 +123,7 @@ docker compose down
 
 The PostgreSQL data volume is preserved.
 
-To also remove the local database volume and all locally stored database data:
+To also remove the local PostgreSQL volume and all locally stored database data:
 
 ```bash
 docker compose down -v
@@ -115,7 +133,7 @@ See `CONTRIBUTING.md` for contribution guidelines and `SECURITY.md` for reportin
 
 ## Maintainer
 
-([@Neeklass](https://github.com/Neeklass))
+[@Neeklass](https://github.com/Neeklass)
 
 ## License
 
