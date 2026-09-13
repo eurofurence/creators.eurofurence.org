@@ -44,6 +44,17 @@ cp .env.example .env
 
 The `.env` file contains local configuration and secrets and must not be committed.
 
+Set `SESSION_SECRET` to a unique random value before starting the application.
+The OIDC login route remains unavailable until a Creator System client is
+provisioned and `OIDC_CLIENT_ID`, `OIDC_TOKEN_ENDPOINT_AUTH_METHOD`, and the
+exact registered `OIDC_REDIRECT_URI` are configured. Set
+`OIDC_CLIENT_SECRET` only if the assigned client authentication method requires
+one. The development callback and client authentication method must come from
+the Identity team; they are not predetermined by this repository.
+
+Authlib keeps temporary login transaction state in the signed, readable session
+cookie during the handshake.
+
 The default development configuration uses the Docker service names for PostgreSQL and S3:
 
 ```dotenv

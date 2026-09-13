@@ -16,17 +16,22 @@ router = APIRouter(
 
 @router.get("/login", name="auth_login")
 async def login(request: Request) -> RedirectResponse:
-    if not settings.oidc_client_id:
+    if not all(
+        (
+            settings.oidc_client_id,
+            settings.oidc_issuer_url,
+            settings.oidc_token_endpoint_auth_method,
+            settings.oidc_redirect_uri,
+        )
+    ):
         raise HTTPException(
             status_code=503,
             detail="OIDC client is not configured",
         )
 
-    redirect_uri = request.url_for("auth_callback")
-
     return await eurofurence.authorize_redirect(
         request,
-        redirect_uri,
+        settings.oidc_redirect_uri,
     )
 
 
@@ -35,6 +40,11 @@ async def callback(request: Request) -> dict[str, str]:
     try:
         token = await eurofurence.authorize_access_token(request)
     except OAuthError as exc:
+        if request.query_params.get("error"):
+            # Authlib returns provider errors before clearing transaction state.
+            await eurofurence.framework.clear_state_data(
+                request.session, request.query_params.get("state")
+            )
         raise HTTPException(
             status_code=401,
             detail="OIDC authentication failed",
@@ -50,7 +60,7 @@ async def callback(request: Request) -> dict[str, str]:
 
     subject = userinfo.get("sub")
 
-    if not subject:
+    if not isinstance(subject, str) or not subject:
         raise HTTPException(
             status_code=401,
             detail="OIDC response did not contain a subject identifier",

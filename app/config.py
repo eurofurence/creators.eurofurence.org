@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     oidc_issuer_url: str | None = None
     oidc_client_id: str | None = None
     oidc_client_secret: SecretStr | None = None
+    oidc_token_endpoint_auth_method: str | None = None
+    oidc_redirect_uri: str | None = None
 
     email_host: str | None = None
     email_username: str | None = None

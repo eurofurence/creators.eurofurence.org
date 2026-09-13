@@ -3,6 +3,15 @@ from authlib.integrations.starlette_client import OAuth
 from app.config import settings
 
 
+client_kwargs = {
+    "scope": "openid profile email",
+    "code_challenge_method": "S256",
+}
+if settings.oidc_token_endpoint_auth_method is not None:
+    client_kwargs["token_endpoint_auth_method"] = (
+        settings.oidc_token_endpoint_auth_method
+    )
+
 oauth = OAuth()
 
 eurofurence = oauth.register(
@@ -18,8 +27,5 @@ eurofurence = oauth.register(
         if settings.oidc_issuer_url is not None
         else None
     ),
-    client_kwargs={
-        "scope": "openid profile email",
-        "code_challenge_method": "S256",
-    },
+    client_kwargs=client_kwargs,
 )
