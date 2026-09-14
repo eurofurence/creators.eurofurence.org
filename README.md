@@ -2,19 +2,20 @@
 
 Web application for managing Eurofurence Video Creator applications.
 
-## Development
+# Development
 
 The application is intended to run as a containerized service within the Eurofurence infrastructure.
 
 Local development uses a VS Code Dev Container with PostgreSQL and an S3-compatible development storage provided through Docker Compose.
 
-### Prerequisites
+
+## Prerequisites
 
 * Docker Desktop
 * Visual Studio Code
 * VS Code Dev Containers extension
 
-### Set up the development environment
+## Set up the development environment
 
 Clone the repository and open it in Visual Studio Code.
 
@@ -34,7 +35,7 @@ If dependencies need to be installed manually, run:
 python -m pip install -r requirements.txt
 ```
 
-### Configure the local environment
+## Configure the local environment
 
 Create a local `.env` file based on `.env.example`.
 
@@ -67,9 +68,9 @@ S3_SECRET_ACCESS_KEY="test"
 S3_REGION="us-east-1"
 ```
 
-### Local services
+## Local services
 
-PostgreSQL and S3Mock are started automatically when the Dev Container starts.
+> **PostgreSQL and S3Mock are started automatically when the Dev Container starts.**
 
 Check that both services are running:
 
@@ -97,7 +98,7 @@ curl http://s3:9090
 
 The response should contain the `creators` bucket.
 
-### Database migrations
+## Database migrations
 
 Apply available database migrations:
 
@@ -111,7 +112,7 @@ To check the currently applied migration:
 python -m alembic current
 ```
 
-### Start the application
+## Start the application
 
 Start the FastAPI development server:
 
@@ -124,7 +125,7 @@ The application is then available at:
 * `http://127.0.0.1:8000/health` — health check
 * `http://127.0.0.1:8000/docs` — OpenAPI documentation
 
-### Stop local services
+## Stop local services
 
 When development is finished, stop the PostgreSQL and S3Mock containers:
 
@@ -148,4 +149,4 @@ See `CONTRIBUTING.md` for contribution guidelines and `SECURITY.md` for reportin
 
 ## License
 
-See `LICENSE`.
+See [LICENSE](LICENSE).
