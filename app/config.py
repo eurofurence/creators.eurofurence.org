@@ -1,5 +1,5 @@
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import SecretStr
 
 
 class Settings(BaseSettings):
@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     environment: str = "development"
 
     session_secret: SecretStr | None = None
+    session_max_age: int = Field(default=14 * 24 * 60 * 60, gt=0)
 
     database_url: SecretStr | None = None
 
@@ -16,10 +17,10 @@ class Settings(BaseSettings):
     s3_secret_access_key: SecretStr | None = None
     s3_region: str = "us-east-1"
 
-    oidc_issuer_url: str | None = None
     oidc_client_id: str | None = None
     oidc_client_secret: SecretStr | None = None
-    oidc_token_endpoint_auth_method: str | None = None
+    oidc_server_metadata_url: str | None = None
+    oidc_issuer_url: str | None = None
     oidc_redirect_uri: str | None = None
 
     email_host: str | None = None
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         env_ignore_empty=True,
+        extra="ignore",
     )
 
 

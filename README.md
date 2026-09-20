@@ -45,16 +45,21 @@ cp .env.example .env
 
 The `.env` file contains local configuration and secrets and must not be committed.
 
-Set `SESSION_SECRET` to a unique random value before starting the application.
-The OIDC login route remains unavailable until a Creator System client is
-provisioned and `OIDC_CLIENT_ID`, `OIDC_TOKEN_ENDPOINT_AUTH_METHOD`, and the
-exact registered `OIDC_REDIRECT_URI` are configured. Set
-`OIDC_CLIENT_SECRET` only if the assigned client authentication method requires
-one. The development callback and client authentication method must come from
-the Identity team; they are not predetermined by this repository.
+Set `SESSION_SECRET` to a unique random value of at least 32 characters before starting the application.
+The existing development OIDC client needs `OIDC_CLIENT_ID`,
+`OIDC_CLIENT_SECRET`, `OIDC_ISSUER_URL`, `OIDC_SERVER_METADATA_URL`, and
+`OIDC_REDIRECT_URI`. Set the redirect URI to the **exact** registered callback,
+including whether it uses `localhost` or `127.0.0.1`, and open the app on that
+same host. `.env.example` illustrates `http://127.0.0.1:8000/auth/callback`.
 
-Authlib keeps temporary login transaction state in the signed, readable session
-cookie during the handshake.
+Authlib uses Authorization Code with PKCE S256 and the `openid` scope. Verified
+`(issuer, subject)` maps to a local user; the authenticated session contains
+only that local `user_id`. OAuth tokens are not retained. Apply the database
+migrations before testing login.
+
+See [Authentication](docs/AUTHENTICATION.md) for configuration, session behavior,
+and the real-client smoke-test checklist. Deployment remains milestone 5;
+Registration eligibility is separate from login.
 
 The default development configuration uses the Docker service names for PostgreSQL and S3:
 
@@ -117,13 +122,35 @@ python -m alembic current
 Start the FastAPI development server:
 
 ```bash
-python -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload --no-access-log
 ```
 
 The application is then available at:
 
 * `http://127.0.0.1:8000/health` — health check
 * `http://127.0.0.1:8000/docs` — OpenAPI documentation
+* `http://127.0.0.1:8000/auth/login` — start OIDC login
+* `http://127.0.0.1:8000/auth/me` — inspect the authenticated local user
+
+Local logout is a `POST` request:
+
+```javascript
+// Run in the browser console on the app origin to include its session cookie:
+await fetch("/auth/logout", {method: "POST"})
+```
+
+## Run tests
+
+Install the development dependencies and run the test suite:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The authentication tests simulate provider HTTP responses with test signing keys
+while exercising Authlib’s actual validation. They use an isolated database and
+do not contact Eurofurence services or use local credentials.
 
 ## Stop local services
 

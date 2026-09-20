@@ -3,19 +3,20 @@
 ```mermaid
 erDiagram
 
-%% Local representation of a person from the Eurofurence Identity Provider.
-%% Event-related identity data is deleted as part of the event cleanup.
-%% Probably needs to be changed later on: (Reg-ID, nickname, email)
-UserIdentity {
+%% Authentication uses a verified issuer/subject pair mapped to a local user.
+%% Name/email are mutable profile attributes; Reg-ID belongs to Registration.
+LocalUser {
     int id PK
-    string subject UK
-    string reg_id
-    string nickname
-    string email
-    datetime created_at
-    datetime updated_at
 }
 
+ExternalIdentity {
+    int id PK
+    int user_id FK
+    string issuer "Unique together with subject"
+    string subject "Unique together with issuer"
+}
+
+LocalUser ||--o{ ExternalIdentity : authenticates_through
 
 %% Represents a single Eurofurence event.
 %% Event-related personal data must be deleted no later than data_delete_at.
@@ -138,7 +139,7 @@ BannedChannel {
 }
 
 
-UserIdentity ||--o{ CreatorApplication : submits
+LocalUser ||--o{ CreatorApplication : submits
 
 Event ||--o{ CreatorApplication : contains
 
@@ -154,7 +155,7 @@ CreatorApplication ||--o{ HelperInvitation : creates
 
 HelperInvitation ||--o| HelperRegistration : results_in
 
-UserIdentity ||--o{ HelperRegistration : registers
+LocalUser ||--o{ HelperRegistration : registers
 
 Event ||--o{ Badge : assigns
 
