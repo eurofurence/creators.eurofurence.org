@@ -7,7 +7,7 @@ pydantic-settings==2.15.0 # Application settings
 python-dotenv==1.2.3      # .env support
 
 # Database
-SQLAlchemy==2.0.52        # ORM
+SQLAlchemy==2.0.54        # ORM
 psycopg[binary]==3.3.5    # PostgreSQL driver
 alembic==1.19.2           # Database migrations
 
