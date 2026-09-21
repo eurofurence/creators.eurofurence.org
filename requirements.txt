@@ -16,5 +16,5 @@ boto3==1.43.92            # S3 client
 
 # Authentication
 authlib==1.8.0            # OAuth 2.0 / OIDC
-httpx2==2.12.0            # HTTP client used with Authlib
+httpx2==2.13.0            # HTTP client used with Authlib
 itsdangerous==2.2.0       # Signed session data
