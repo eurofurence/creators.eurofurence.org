@@ -162,7 +162,12 @@ def test_rejection_intents_deliver(application_engine, target):
     with Session(application_engine, expire_on_commit=False) as db:
         app_id = run(
             workflow.submit(
-                db, 1, m2.input_data(), m2.RegistrationFake(), m2.IdentityFake()
+                db,
+                1,
+                m2.input_data(),
+                m2.RegistrationFake(),
+                m2.IdentityFake(),
+                **m2.picture_input(),
             )
         )
         if target == "NOT_APPROVED":

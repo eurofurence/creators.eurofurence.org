@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block content %}
+<h1>Eurofurence Creator System</h1>
+<p><a href="/auth/login">Log in with Eurofurence Identity</a> to apply or manage your participation.</p>
+<h2>Creator galleries</h2><ul>{% for year in years %}<li><a href="/gallery/{{ year }}">Eurofurence {{ year }}</a></li>{% else %}<li>No event is currently available.</li>{% endfor %}</ul>
+{% endblock %}

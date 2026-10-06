@@ -3,6 +3,7 @@ import os
 # Set these before importing application settings; never use a developer's .env.
 os.environ.update(
     ENVIRONMENT="development",
+    REGISTRATION_PROVIDER="unavailable",
     SESSION_SECRET="test-session-secret-at-least-32-characters",
     DATABASE_URL="sqlite://",
     OIDC_CLIENT_ID="test-client",

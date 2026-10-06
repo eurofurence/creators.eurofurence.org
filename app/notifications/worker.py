@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.applications.models import BusinessAudit, NotificationOutbox
 from app.applications.workflow import utc
+from app.events.models import Event
 from app.notifications.client import (
     DeliveryFailure,
     Notification,
@@ -64,9 +65,24 @@ def failed_audit(db, row):
 def claim(db: Session, now: datetime):
     db.rollback()
     with db.begin():
+        event = db.scalar(
+            select(Event)
+            .where(
+                Event.data_delete_at > now,
+                Event.cleanup_started_at.is_(None),
+                Event.id.in_(select(NotificationOutbox.event_id).where(due(now))),
+            )
+            .order_by(Event.id)
+            .with_for_update(skip_locked=True)
+        )
+        if event is None:
+            return None
         row = db.scalar(
             select(NotificationOutbox)
-            .where(due(now))
+            .where(
+                due(now),
+                NotificationOutbox.event_id == event.id,
+            )
             .order_by(NotificationOutbox.id)
             .with_for_update(skip_locked=True)
             .execution_options(populate_existing=True)

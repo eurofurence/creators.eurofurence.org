@@ -16,6 +16,7 @@ class Base(DeclarativeBase):
 engine = create_engine(
     settings.database_url.get_secret_value(),
     pool_pre_ping=True,
+    hide_parameters=True,
 )
 
 SessionLocal = sessionmaker(

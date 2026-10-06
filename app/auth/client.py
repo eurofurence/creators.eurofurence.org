@@ -3,6 +3,7 @@ from urllib.parse import urlsplit
 from authlib.integrations.base_client import OAuthError
 from authlib.integrations.starlette_client import OAuth
 
+from app.auth.configuration import oidc_status
 from app.config import settings
 
 oauth = OAuth()
@@ -25,35 +26,19 @@ eurofurence = oauth.register(
 
 
 def require_configuration() -> None:
-    values = (
-        settings.oidc_client_id,
-        settings.oidc_client_secret.get_secret_value()
-        if settings.oidc_client_secret
-        else None,
-        settings.oidc_issuer_url,
-        settings.oidc_server_metadata_url,
-        settings.oidc_redirect_uri,
-    )
-    if any(not value or value.startswith("INSERT_") for value in values):
-        raise ValueError("OIDC client is not configured")
-    for value in (settings.oidc_issuer_url, settings.oidc_server_metadata_url):
-        url = urlsplit(value)
-        if url.scheme != "https" or not url.hostname or url.username or url.fragment:
-            raise ValueError("OIDC provider URLs must use HTTPS")
-    redirect = urlsplit(settings.oidc_redirect_uri)
-    local_http = (
-        settings.environment == "development"
-        and redirect.scheme == "http"
-        and redirect.hostname in {"localhost", "127.0.0.1", "::1"}
-    )
-    if (
-        not redirect.hostname
-        or redirect.username
-        or redirect.fragment
-        or redirect.query
-        or (redirect.scheme != "https" and not local_http)
-    ):
-        raise ValueError("Invalid OIDC redirect URI")
+    problems = {
+        key: status
+        for key, status in oidc_status(settings).items()
+        if status != "configured"
+    }
+    if problems:
+        import logging
+
+        for key, status in problems.items():
+            logging.getLogger(__name__).warning(
+                "OIDC configuration: %s is %s", key.upper(), status
+            )
+        raise ValueError("OIDC configuration unavailable")
 
 
 async def require_provider_metadata() -> None:

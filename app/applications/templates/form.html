@@ -2,7 +2,7 @@
 {% block content %}
 <h1>{{ 'Administrative correction' if administrative else 'Creator application' }}</h1>
 {% if error %}<p role="alert">{{ error }}</p>{% endif %}
-<form method="post">
+<form method="post" enctype="multipart/form-data">
 {{ csrf.csrf_token }}
 {% if submitted %}
 <input type="hidden" name="application_id" value="{{ submitted.get('application_id', '') }}"><input type="hidden" name="version" value="{{ submitted.get('version', '') }}">
@@ -21,6 +21,17 @@
 <label>Convention videos (optional, up to 10 HTTPS URLs, one per line)
 <textarea name="videos" rows="6">{% if submitted %}{{ submitted.get('videos', '') }}{% else %}{% for video in videos %}{{ video.url }}{{ '\n' if not loop.last }}{% endfor %}{% endif %}</textarea></label>
 {% if administrative %}<label>Correction reason <textarea name="correction_reason" required maxlength="4000">{{ submitted.get('correction_reason', '') if submitted else '' }}</textarea></label>{% endif %}
+{% if not record and not administrative %}
+<label>Profile picture (required, PNG, exactly 600×600 pixels, maximum {{ '%g'|format(upload_limit_mib) }} MiB)
+<input type="file" name="picture" accept="image/png" required></label>
+<p>Your picture is part of the application and will be reviewed before approval. If submission fails, select the file again before retrying.</p>
+{% endif %}
 <button type="submit">{{ 'Save changes' if record or administrative else 'Submit application' }}</button>
-</form><script src="/application-assets/forms.js" defer></script>
+</form>
+{% if record %}
+<h2>Application picture</h2>
+{% if has_picture %}<img src="/creators/{{ record.id }}/picture" alt="Application profile picture" width="200" height="200">{% else %}<p role="alert">Upload your picture before the application can enter review.</p>{% endif %}
+<form method="post" enctype="multipart/form-data" action="/creators/{{ record.id }}/picture">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}"><label>PNG, exactly 600×600 pixels <input type="file" name="picture" accept="image/png" required></label>{% include "admin_policy.html" %}<button>{{ 'Replace picture' if has_picture else 'Upload picture' }}</button></form>
+{% endif %}
+<script src="/application-assets/forms.js" defer></script>
 {% endblock %}

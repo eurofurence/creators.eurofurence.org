@@ -56,6 +56,7 @@ def approve(db, user_id=1):
             input_data(f"@creator{user_id}"),
             RegistrationFake(),
             IdentityFake(),
+            **m2.picture_input(),
         )
     )
     record = db.get(CreatorApplication, application_id)
@@ -226,7 +227,14 @@ def test_profile_validation_and_ownership(approved, actor, name, code):
 def test_profile_requires_approval_and_active_participation(application_engine):
     with Session(application_engine) as db:
         key = run(
-            workflow.submit(db, 1, input_data(), RegistrationFake(), IdentityFake())
+            workflow.submit(
+                db,
+                1,
+                input_data(),
+                RegistrationFake(),
+                IdentityFake(),
+                **m2.picture_input(),
+            )
         )
         with pytest.raises(HTTPException, match="active approved"):
             service.save_profile(db, 1, key, 1, "name", input_data().channels)
@@ -680,8 +688,11 @@ def test_creator_and_helper_cross_access(approved):
 
 
 def test_m3_browser_flow_privacy_csrf_and_upload(browser, monkeypatch):
+    from app.main import app
+
     monkeypatch.setattr(settings, "s3_bucket", None)
     client, _, engine = browser
+    app.dependency_overrides.pop(images.get_image_store)
     with Session(engine) as db:
         key = approve(db)
     token = csrf(client, f"/creators/{key}")

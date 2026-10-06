@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.datastructures import UploadFile
 
 from app.applications import workflow
 from app.applications.input import CONTENT_TYPES, PLATFORMS, parse_application
@@ -19,6 +20,9 @@ from app.applications.models import (
 )
 from app.applications.security import csrf_form, protected_form, require_admin
 from app.auth.dependencies import get_current_user
+from app.config import settings
+from app.creators import images
+from app.creators.models import CreatorProfile, ProfileImage
 from app.database import get_db
 from app.identity.models import LocalUser
 from app.identity.profile import IdentityProfileClient, get_identity_profile_client
@@ -31,6 +35,7 @@ DB = Annotated[Session, Depends(get_db)]
 User = Annotated[LocalUser, Depends(get_current_user)]
 Registration = Annotated[RegistrationClient, Depends(get_registration_client)]
 Identity = Annotated[IdentityProfileClient, Depends(get_identity_profile_client)]
+Store = Annotated[images.ImageStore, Depends(images.get_image_store)]
 
 
 def render(request, template, *, status_code=200, **context):
@@ -42,6 +47,7 @@ def render(request, template, *, status_code=200, **context):
             "csrf": csrf_form(request),
             "platforms": PLATFORMS,
             "content_types": CONTENT_TYPES,
+            "upload_limit_mib": settings.profile_image_max_bytes / (1024 * 1024),
             **context,
         },
         headers={
@@ -53,8 +59,13 @@ def render(request, template, *, status_code=200, **context):
 
 
 def details(db, record):
+    profile = db.get(CreatorProfile, record.id) if record else None
+    image = (
+        db.get(ProfileImage, profile.image_id) if profile and profile.image_id else None
+    )
     return {
         "record": record,
+        "has_picture": image is not None and image.state == "ACTIVE",
         "channels": db.scalars(
             select(CreatorChannel)
             .where(CreatorChannel.application_id == record.id)
@@ -80,6 +91,11 @@ def integer(data, field):
         return int(data[field])
     except ValueError, TypeError, KeyError:
         raise HTTPException(422, "Invalid form version or application ID") from None
+
+
+@router.get("/account")
+def account(request: Request, user: User):
+    return render(request, "account.html")
 
 
 @router.get("/applications")
@@ -110,50 +126,74 @@ def application_form(request: Request, db: DB, user: User):
 
 @router.post("/applications/form")
 async def save_application(
-    request: Request, db: DB, user: User, registration: Registration, identity: Identity
+    request: Request,
+    db: DB,
+    user: User,
+    registration: Registration,
+    identity: Identity,
+    store: Store,
 ):
-    form = await protected_form(request)
-    user_id = user.id
+    form = await protected_form(request, upload=True)
     try:
-        data = parse_application(form)
-    except ValueError as error:
-        return render(
-            request,
-            "form.html",
-            administrative=False,
-            record=None,
-            channels=[],
-            videos=[],
-            submitted=form,
-            error=str(error),
-        )
-    try:
-        if form.get("application_id"):
-            workflow.edit(
-                db,
-                user_id,
-                integer(form, "application_id"),
-                integer(form, "version"),
-                data,
+        user_id = user.id
+        try:
+            data = parse_application(form)
+        except ValueError as error:
+            record = workflow.application_for_user(
+                db, user_id, settings.active_event_id
             )
-        else:
-            await workflow.submit(db, user_id, data, registration, identity)
-    except HTTPException as error:
-        if error.status_code not in (409, 503):
-            raise
-        db.rollback()
-        return render(
-            request,
-            "form.html",
-            status_code=error.status_code,
-            administrative=False,
-            record=None,
-            channels=[],
-            videos=[],
-            submitted=form,
-            error=error.detail,
-        )
-    return RedirectResponse("/applications", status_code=303)
+            return render(
+                request,
+                "form.html",
+                administrative=False,
+                submitted=form,
+                error=str(error),
+                **details(db, record),
+            )
+        try:
+            if form.get("application_id"):
+                workflow.edit(
+                    db,
+                    user_id,
+                    integer(form, "application_id"),
+                    integer(form, "version"),
+                    data,
+                )
+            else:
+                file = form.get("picture")
+                picture = (
+                    await file.read(settings.profile_image_max_bytes + 1)
+                    if isinstance(file, UploadFile)
+                    else None
+                )
+                await workflow.submit(
+                    db,
+                    user_id,
+                    data,
+                    registration,
+                    identity,
+                    picture=picture,
+                    store=store,
+                )
+        except HTTPException as error:
+            if error.status_code not in (409, 413, 422, 503):
+                raise
+            db.rollback()
+            record = workflow.application_for_user(
+                db, user_id, settings.active_event_id
+            )
+            return render(
+                request,
+                "form.html",
+                status_code=error.status_code,
+                administrative=False,
+                submitted=form,
+                error=error.detail,
+                **details(db, record),
+            )
+        return RedirectResponse("/applications", status_code=303)
+    finally:
+        await form.close()
 
 
 @router.get("/admin/applications")

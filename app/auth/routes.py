@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.responses import RedirectResponse
 
+from app.applications.security import protected_form
 from app.auth.client import (
     eurofurence,
     require_configuration,
@@ -29,7 +30,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def authentication_error(request: Request, status: int, detail: str) -> HTTPException:
     request.session.clear()
     # Never log exception text, callback parameters, tokens, or provider descriptions.
-    logger.warning("OIDC authentication failed (%s)", status)
+    # detail is an internal fixed category, never a provider-supplied message.
+    logger.warning("%s (%s)", detail, status)
     return HTTPException(status_code=status, detail=detail)
 
 
@@ -114,6 +116,7 @@ async def callback(
             request, 503, "Authentication storage unavailable"
         ) from None
     request.session["user_id"] = user.id
+    request.session["identity_key"] = user.session_key
     return {"status": "authenticated", "user_id": user.id}
 
 
@@ -124,5 +127,6 @@ def me(user: Annotated[LocalUser, Depends(get_current_user)]) -> dict[str, int]:
 
 @router.post("/logout")
 async def logout(request: Request) -> dict[str, str]:
+    await protected_form(request)
     request.session.clear()
     return {"status": "logged_out"}

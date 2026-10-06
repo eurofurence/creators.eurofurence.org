@@ -18,6 +18,12 @@ python -m pip install -r requirements-dev.txt
 
 Runtime dependencies are in `requirements.txt`.
 
+For Windows host development, run `powershell -ExecutionPolicy Bypass -File scripts/dev-setup.ps1`.
+It preserves valid local credentials/session settings in ignored `.env`, prompts
+securely for missing development OIDC credentials, starts local storage, migrates,
+and checks configuration. Later sessions reuse `.env`; environment variables still
+override it. Use `python -m app.dev.check` for value-free readiness diagnostics.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and configure it for your environment. Never commit
@@ -68,7 +74,9 @@ python -m uvicorn app.main:app --reload --no-access-log
 
 At the configured application origin, `/health` provides a health check, `/docs`
 provides OpenAPI documentation, `/auth/login` starts login, and `/auth/me` returns
-the authenticated local user ID. `POST /auth/logout` clears the local session.
+the authenticated local user ID. `/ready` verifies DB connectivity; optional
+external services do not affect readiness. Use the CSRF-protected logout form
+at `/account` to clear the local session.
 
 `/applications` provides the creator dashboard and form. Administrators use
 `/admin/applications`. Submission and approval require available Registration
@@ -90,8 +98,24 @@ status means deletions remain pending and the command should be retried:
 python -m app.creators.images
 ```
 
-Run this successfully before deleting event records. This command handles image
-assets only; full event/person cleanup remains pending.
+For full retention cleanup, schedule `python -m app.events.cleanup`. It removes
+due event assets and workflow data, unused local identities/roles, and finally
+the Event. Failures retain references for retry and return a nonzero exit code;
+ADMIN can inspect `/admin/retention`. Configure `data_delete_at` explicitly or
+use its default of 30 days after `ends_at`. Banned accounts remain independent.
+Recreated identities require explicit role grants again.
+
+`python -m app.events.manage event.json --reason "Event configuration"` creates
+or updates an event from JSON fields matching the Event configuration. Include
+id, year, name, starts_at, ends_at, application_open_at, application_close_at,
+badge_change_deadline_at and badge_print_at. Dates require explicit UTC offsets;
+helper_limit and data_delete_at are optional. Set ACTIVE_EVENT_ID separately.
+
+Public galleries are at `/gallery/{year}` and the read-only public API at
+`/api/v1/events/{year}/creators`. The API and public images support conditional
+GET using ETag. Responses require revalidation so hidden/expired profiles are
+not deliberately served stale by browser caches. ADMIN public visibility
+controls are on each creator's administration page.
 
 Staff use `/staff` to select an authorized event for Reg-ID lookup and per-badge
 pickup. ADMIN can undo accidental pickup, manage banned channels, inspect failed
@@ -164,6 +188,17 @@ docker build -t creators .
 
 The image runs Uvicorn on port 8000. Supply environment-specific configuration
 and apply migrations separately before using authentication.
+
+The Helm chart is `charts/creators`. Set image.repository and image.tag, plus
+environment-specific env/extraEnv/envFrom references. Referenced configuration
+and secrets must exist before the pre-install/pre-upgrade migration Job. The
+chart does not provision PostgreSQL, S3 or Identity. Ingress and worker CronJobs
+are opt-in. Render and lint with your deployment values before rollout.
+Migrations never run in application replicas or automatically downgrade during
+rollback. Migration 18df24a910ce requires a coordinated application cutover:
+drain old writers before migration; existing sessions must log in again.
+Keep Uvicorn access logging disabled and configure upstream log redaction for
+callback query parameters. Enable HTTPS ingress for secure production cookies.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines,
 [SECURITY.md](SECURITY.md) for security reporting, and [LICENSE](LICENSE).

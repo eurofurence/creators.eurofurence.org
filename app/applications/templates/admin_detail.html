@@ -5,8 +5,10 @@
 <dl><dt>Reg-ID</dt><dd>{{ record.reg_id or 'Unavailable' }}</dd><dt>Nickname</dt><dd>{{ record.nickname or 'Unavailable' }}</dd><dt>Email</dt><dd>{{ record.email or 'Unavailable' }}</dd></dl>
 {% include "details.html" %}
 <p><a href="/creators/{{ record.id }}?administrative=true">Manage creator profile, helpers and participation</a></p>
+{% if record.status == 'NEW' %}<p>Step 1: Check that the application is complete, then start review. Approval or rejection after review becomes available in the next step.</p>{% elif record.status == 'ON_REVIEW' %}<p>Step 2: Review the application and picture, then approve or reject it.</p>{% endif %}
 <form method="post">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}">
-<label>Next status <select name="status">{% for status in transitions %}<option>{{ status }}</option>{% endfor %}</select></label>
+{% set labels = {'ON_REVIEW': 'Start review' if record.status == 'NEW' else 'Return to review', 'NOT_ACCEPTED': 'Do not accept for review', 'APPROVED': 'Approve application', 'NOT_APPROVED': 'Reject after review'} %}
+<label>Review action <select name="status">{% for status in transitions %}<option value="{{ status }}">{{ labels[status] }}</option>{% endfor %}</select></label>
 <label>Applicant-visible reason (required for rejection or approval reversal)<textarea name="reason" maxlength="4000"></textarea></label>
 <label>Private staff notes<textarea name="staff_notes" maxlength="10000">{{ record.staff_notes }}</textarea></label>
 <label><input type="checkbox" name="exceptional" value="yes">Exceptional correction after the badge change deadline (reason required)</label>

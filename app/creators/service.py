@@ -1,8 +1,10 @@
+from datetime import UTC, datetime
+
 from fastapi import HTTPException
 from sqlalchemy import delete, select
 
 from app.applications.models import CreatorChannel
-from app.applications.workflow import active_event, get_application
+from app.applications.workflow import active_event, applicant_can_edit, get_application
 from app.creators.models import CreatorProfile
 from app.creators.policy import authorize, change_allowed, check_version, require_active
 from app.helpers.service import record_change, touch
@@ -37,6 +39,46 @@ def profile_context(
 
 def banned_matches(db, application_id):
     return warnings(db, application_id)
+
+
+def picture_context(
+    db,
+    actor_id,
+    application_id,
+    *,
+    administrative=False,
+    reason="",
+    exceptional=False,
+    version=None,
+):
+    event = active_event(db, lock=True)
+    application = get_application(db, application_id, event.id)
+    if application.status == "APPROVED":
+        return profile_context(
+            db,
+            actor_id,
+            application_id,
+            administrative=administrative,
+            reason=reason,
+            exceptional=exceptional,
+            version=version,
+        )
+    authorize(
+        db, actor_id, application.user_id, administrative=administrative, reason=reason
+    )
+    if administrative:
+        change_allowed(event, administrative=True, exceptional=exceptional)
+    elif not applicant_can_edit(event, application, datetime.now(UTC)):
+        raise HTTPException(
+            409, "Applicant picture editing is locked once review begins."
+        )
+    if version is not None:
+        check_version(application, version)
+    profile = db.get(CreatorProfile, application.id)
+    if profile is None:
+        profile = CreatorProfile(application_id=application.id)
+        db.add(profile)
+    return event, application, profile
 
 
 def save_profile(

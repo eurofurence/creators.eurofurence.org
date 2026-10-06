@@ -1,4 +1,6 @@
 <p>Status: <strong>{{ record.status }}</strong></p>
+<h2>Application picture</h2>
+{% if has_picture %}<img src="/creators/{{ record.id }}/picture" alt="Application profile picture" width="200" height="200">{% else %}<p>No picture supplied. A picture is required before review or approval.</p>{% endif %}
 {% if badge %}<p>Reserved badge number: {{ badge.badge_number }}</p>{% endif %}
 {% if record.outcome_reason %}<h2>Decision reason</h2><p>{{ record.outcome_reason }}</p>{% endif %}
 <h2>Planned content</h2><ul>{% for kind in content_types %}{% if record[kind.lower()] %}<li>{{ kind }}</li>{% endif %}{% endfor %}</ul>

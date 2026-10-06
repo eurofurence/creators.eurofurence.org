@@ -9,13 +9,32 @@ from app.applications.models import (
 )
 from app.applications.pages import DB, Registration, User, integer, render
 from app.applications.security import protected_form, require_admin
-from app.creators.models import BannedChannel
+from app.creators.models import BannedChannel, ProfileImage
 from app.creators.pages import Store
 from app.events.models import Event
 from app.moderation import service as moderation
 from app.staff import exports, service
 
 router = APIRouter()
+
+
+@router.get("/admin/retention")
+def retention(request: Request, db: DB, user: User):
+    require_admin(db, user.id)
+    return render(
+        request,
+        "retention.html",
+        events=list(db.scalars(select(Event).order_by(Event.data_delete_at))),
+        failed_images=len(
+            list(
+                db.scalars(
+                    select(ProfileImage.id).where(
+                        ProfileImage.deletion_failed.is_(True)
+                    )
+                )
+            )
+        ),
+    )
 
 
 def download(data, filename, media_type):

@@ -10,6 +10,7 @@ from app.applications.models import (
     LocalRoleAssignment,
 )
 from app.applications.security import require_admin
+from app.applications.workflow import utc
 from app.creators.models import CreatorProfile
 from app.creators.policy import creator_active, helper_active
 from app.events.models import Event
@@ -40,6 +41,10 @@ def event_record(db, event_id, *, lock=False):
     event = db.get(Event, event_id, with_for_update=lock, populate_existing=True)
     if event is None:
         raise HTTPException(404, "Event not found")
+    if event.cleanup_started_at is not None or utc(
+        event.data_delete_at
+    ) <= datetime.now(UTC):
+        raise HTTPException(410, "This event is no longer available.")
     return event
 
 

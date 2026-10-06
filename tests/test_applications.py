@@ -7,6 +7,8 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
+from io import BytesIO
 from threading import Barrier
 from uuid import uuid4
 
@@ -14,6 +16,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
+from PIL import Image
 from sqlalchemy import create_engine, delete, func, select, text
 from sqlalchemy import event as sql_event
 from sqlalchemy.engine import make_url
@@ -33,6 +36,7 @@ from app.applications.models import (
     NotificationOutbox,
 )
 from app.config import settings
+from app.creators import images
 from app.database import Base, get_db
 from app.events.models import Event
 from app.identity.models import ExternalIdentity, LocalUser
@@ -65,6 +69,33 @@ class RegistrationFake:
 class IdentityFake:
     async def email(self, identity):
         return "attendee@example.test"
+
+
+@lru_cache
+def application_picture():
+    output = BytesIO()
+    Image.new("RGB", (600, 600), "blue").save(output, format="PNG")
+    return output.getvalue()
+
+
+class SubmissionStore:
+    def __init__(self):
+        self.objects = {}
+
+    def put(self, key, data):
+        self.objects[key] = data
+
+    def get(self, key):
+        if key not in self.objects:
+            raise images.ImageStorageUnavailable
+        return self.objects[key]
+
+    def delete(self, key):
+        self.objects.pop(key, None)
+
+
+def picture_input():
+    return {"picture": application_picture(), "store": SubmissionStore()}
 
 
 def input_data(handle="@creator"):
@@ -166,7 +197,15 @@ def application_engine(request, monkeypatch):
 
 def login(client, user_id):
     client.cookies.clear()
-    payload = base64.b64encode(json.dumps({"user_id": user_id}).encode())
+    database = app.dependency_overrides[get_db]()
+    db = next(database)
+    try:
+        identity_key = db.get(LocalUser, user_id).session_key
+    finally:
+        database.close()
+    payload = base64.b64encode(
+        json.dumps({"user_id": user_id, "identity_key": identity_key}).encode()
+    )
     client.cookies.set(
         "creator_session",
         TimestampSigner(settings.session_secret.get_secret_value())
@@ -184,6 +223,7 @@ def csrf(client, path):
 @pytest.fixture
 def browser(application_engine):
     registration = RegistrationFake()
+    store = SubmissionStore()
 
     def database():
         with Session(application_engine, expire_on_commit=False) as db:
@@ -192,6 +232,7 @@ def browser(application_engine):
     app.dependency_overrides[get_db] = database
     app.dependency_overrides[get_registration_client] = lambda: registration
     app.dependency_overrides[get_identity_profile_client] = IdentityFake
+    app.dependency_overrides[images.get_image_store] = lambda: store
     with TestClient(app) as client:
         login(client, 1)
         yield client, registration, application_engine
@@ -208,13 +249,25 @@ def submit_form(client, **changes):
         "videos": "https://video.example/watch?v=123",
     }
     data.update(changes)
-    return client.post("/applications/form", data=data, follow_redirects=False)
+    return client.post(
+        "/applications/form",
+        data=data,
+        files={"picture": ("picture.png", application_picture(), "image/png")},
+        follow_redirects=False,
+    )
 
 
 def submit_record(engine, user=1):
     with Session(engine, expire_on_commit=False) as db:
         return asyncio.run(
-            workflow.submit(db, user, input_data(), RegistrationFake(), IdentityFake())
+            workflow.submit(
+                db,
+                user,
+                input_data(),
+                RegistrationFake(),
+                IdentityFake(),
+                **picture_input(),
+            )
         )
 
 
@@ -406,7 +459,11 @@ def test_submission_and_approval_fail_closed_without_state_changes(
     fake.status = state
     with Session(application_engine) as db:
         with pytest.raises(HTTPException) as error:
-            asyncio.run(workflow.submit(db, 1, input_data(), fake, IdentityFake()))
+            asyncio.run(
+                workflow.submit(
+                    db, 1, input_data(), fake, IdentityFake(), **picture_input()
+                )
+            )
         assert error.value.status_code == code
     record_id = submit_record(application_engine)
     review_record(application_engine, record_id, 1, "ON_REVIEW")
@@ -577,12 +634,21 @@ def test_postgres_concurrent_submits_and_approvals(postgres_engine, monkeypatch)
         fake.hook = lambda: barrier.wait(timeout=10)
         with Session(postgres_engine) as db:
             return asyncio.run(
-                workflow.submit(db, 911, input_data(), fake, IdentityFake())
+                workflow.submit(
+                    db, 911, input_data(), fake, IdentityFake(), **picture_input()
+                )
             )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         ids = list(executor.map(submit_once, range(2)))
     assert ids[0] == ids[1]
+    from app.creators.models import ProfileImage
+
+    with Session(postgres_engine) as db:
+        event_images = db.scalars(
+            select(ProfileImage).where(ProfileImage.event_id == 910)
+        ).all()
+        assert len(event_images) == 1 and event_images[0].state == "ACTIVE"
     review_record(postgres_engine, ids[0], 1, "ON_REVIEW", actor=910)
 
     def approve_once(_):

@@ -172,7 +172,10 @@ def test_callback_stores_only_local_user_and_logout_clears_session(
     response = finish(client, provider)
     assert response.status_code == 200
     user_id = response.json()["user_id"]
-    assert session_data(client) == {"user_id": user_id}
+    assert session_data(client) == {
+        "user_id": user_id,
+        "identity_key": db.get(LocalUser, user_id).session_key,
+    }
     assert client.get("/auth/me").json() == {"user_id": user_id}
     identity = db.scalar(select(ExternalIdentity))
     assert (identity.issuer, identity.subject, identity.user_id) == (
@@ -183,7 +186,15 @@ def test_callback_stores_only_local_user_and_logout_clears_session(
     cookie = response.headers["set-cookie"].lower()
     assert "httponly" in cookie and "samesite=lax" in cookie
     assert "secure" not in cookie
-    assert client.post("/auth/logout").status_code == 200
+    from test_applications import csrf
+
+    assert client.post("/auth/logout").status_code == 403
+    assert (
+        client.post(
+            "/auth/logout", data={"csrf_token": csrf(client, "/account")}
+        ).status_code
+        == 200
+    )
     assert client.get("/auth/me").status_code == 401
 
 

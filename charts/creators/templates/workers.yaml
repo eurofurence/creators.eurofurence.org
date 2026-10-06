@@ -1,0 +1,27 @@
+{{- range $name, $worker := .Values.workers }}
+{{- if $worker.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "creators.name" $ }}-{{ $name }}
+spec:
+  schedule: {{ $worker.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          {{- include "creators.pod" $ | nindent 10 }}
+          restartPolicy: Never
+          containers:
+            - name: {{ $name }}
+              {{- include "creators.container" $ | nindent 14 }}
+              command: [python, -m, {{ if eq $name "cleanup" }}app.events.cleanup{{ else }}app.notifications.worker{{ end }}]
+{{- end }}
+{{- end }}

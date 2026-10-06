@@ -1,0 +1,41 @@
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+replicaCount: 1
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+env:
+  ENVIRONMENT: production
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+# Existing ConfigMap/Secret references must exist before the migration hook.
+envFrom: []
+extraEnv: []
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+service:
+  port: 80
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+migration:
+  enabled: true
+  activeDeadlineSeconds: 600
+workers:
+  notifications:
+    enabled: false
+    schedule: "* * * * *"
+  cleanup:
+    enabled: false
+    schedule: "*/15 * * * *"

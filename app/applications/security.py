@@ -1,6 +1,7 @@
 from fastapi import HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.datastructures import UploadFile
 from wtforms import Form
 from wtforms.csrf.session import SessionCSRF
 
@@ -47,6 +48,12 @@ async def protected_form(request: Request, *, upload=False):
     data = await request.form(
         max_files=1 if upload else 0, max_fields=300, max_part_size=65536
     )
+    if any(
+        isinstance(value, UploadFile) and (not upload or name != "picture")
+        for name, value in data.multi_items()
+    ):
+        await data.close()
+        raise HTTPException(422, "Only the picture field accepts a file upload.")
     if not csrf_form(request, data).validate():
         await data.close()
         raise HTTPException(

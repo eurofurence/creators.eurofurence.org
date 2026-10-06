@@ -1,5 +1,10 @@
 {% extends "base.html" %}{% block content %}
 <h1>Creator profile and helpers</h1>
+{% if administrative and profile %}
+<h2>Public visibility</h2>
+<form method="post" action="/admin/creators/{{ record.id }}/visibility">{{ csrf.csrf_token }}<input type="hidden" name="hidden" value="{{ 'no' if profile.publicly_hidden else 'yes' }}"><button>{{ 'Restore public profile' if profile.publicly_hidden else 'Hide public profile' }}</button></form>
+{% for channel in channels %}<form method="post" action="/admin/creators/{{ record.id }}/visibility">{{ csrf.csrf_token }}<input type="hidden" name="channel_id" value="{{ channel.id }}"><input type="hidden" name="hidden" value="{{ 'no' if channel.publicly_hidden else 'yes' }}"><span>{{ channel.platform }} / {{ channel.normalized_account }}</span> <button>{{ 'Restore public channel' if channel.publicly_hidden else 'Hide public channel' }}</button></form>{% endfor %}
+{% endif %}
 <p>Application: {{ record.status }}. Participation: {{ 'Withdrawn' if record.withdrawn_at else ('Active' if active else 'Inactive') }}.</p>
 <p>Change deadline: {{ event.badge_change_deadline_at or 'Not configured' }} (UTC).</p>
 {% if not editable %}<p>Normal profile and helper changes are currently locked.</p>{% endif %}

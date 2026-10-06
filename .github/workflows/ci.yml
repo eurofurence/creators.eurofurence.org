@@ -38,5 +38,19 @@ jobs:
         run: python -m ruff check .
       - name: Check formatting
         run: python -m ruff format --check .
+      - name: Install and verify Helm
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSLO https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz
+          curl -fsSLO https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz.sha256sum
+          sha256sum -c helm-v4.3.0-linux-amd64.tar.gz.sha256sum
+          tar -xzf helm-v4.3.0-linux-amd64.tar.gz
+          echo "HELM_BINARY=$RUNNER_TEMP/linux-amd64/helm" >> "$GITHUB_ENV"
+      - name: Lint deployment chart
+        run: '"$HELM_BINARY" lint charts/creators --set image.repository=creators --set image.tag=test'
       - name: Test
         run: python -m pytest
+      - name: Build production container
+        run: docker build -t creators-ci .

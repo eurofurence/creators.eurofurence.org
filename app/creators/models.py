@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import uuid4
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -29,6 +30,8 @@ class CreatorProfile(Base):
         ForeignKey("creator_applications.id", ondelete="CASCADE"), primary_key=True
     )
     channel_name: Mapped[str] = mapped_column(default="")
+    public_id: Mapped[str] = mapped_column(unique=True, default=lambda: uuid4().hex)
+    publicly_hidden: Mapped[bool] = mapped_column(default=False, server_default="false")
     image_id: Mapped[int | None] = mapped_column(
         ForeignKey("profile_images.id", ondelete="SET NULL"), unique=True
     )

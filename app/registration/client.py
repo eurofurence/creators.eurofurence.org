@@ -48,5 +48,13 @@ class UnavailableRegistrationClient:
 
 
 def get_registration_client() -> RegistrationClient:
+    from app.config import settings
+
+    if settings.registration_provider == "manual_test":
+        from app.registration.manual import ManualTestRegistrationClient
+
+        return ManualTestRegistrationClient(
+            settings.registration_manual_file, environment=settings.environment
+        )
     # No live transport until the EF Registration contract and access are supplied.
     return UnavailableRegistrationClient()

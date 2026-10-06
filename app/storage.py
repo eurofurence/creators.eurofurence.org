@@ -21,6 +21,9 @@ def get_s3_client():
         aws_secret_access_key=settings.s3_secret_access_key.get_secret_value(),
         region_name=settings.s3_region,
         config=Config(
+            connect_timeout=5,
+            read_timeout=30,
+            retries={"max_attempts": 2, "mode": "standard"},
             s3={"addressing_style": "path"},
         ),
     )
@@ -51,7 +54,14 @@ def get_object(key: str) -> bytes:
         Key=key,
     )
 
-    return response["Body"].read()
+    body = response["Body"]
+    try:
+        data = body.read(settings.profile_image_max_bytes + 1)
+        if len(data) > settings.profile_image_max_bytes:
+            raise RuntimeError("Stored image exceeds the configured limit")
+        return data
+    finally:
+        body.close()
 
 
 def delete_object(key: str) -> None:

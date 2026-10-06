@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import CheckConstraint, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,4 +27,11 @@ class Event(Base):
     )
     application_open_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     application_close_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    data_delete_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    data_delete_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda context: (
+            context.get_current_parameters()["ends_at"] + timedelta(days=30)
+        ),
+    )
+    cleanup_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cleanup_failed: Mapped[bool] = mapped_column(default=False, server_default="false")

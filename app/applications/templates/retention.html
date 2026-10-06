@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block content %}
+<h1>Retention operations</h1>
+<p>{{ failed_images }} image deletions need retry. The cleanup worker retries outstanding deletions; events remain stored until dependent cleanup succeeds.</p>
+<table><thead><tr><th>Event</th><th>Delete at (UTC)</th><th>Cleanup started</th><th>Retry required</th></tr></thead>
+<tbody>{% for event in events %}<tr><td>{{ event.name }}</td><td>{{ event.data_delete_at }}</td><td>{{ event.cleanup_started_at or 'Not started' }}</td><td>{{ 'Yes' if event.cleanup_failed else 'No' }}</td></tr>{% endfor %}</tbody></table>
+{% endblock %}

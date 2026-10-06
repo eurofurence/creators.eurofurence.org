@@ -37,11 +37,15 @@ def active_event(db: Session, *, lock=False) -> Event:
     query = select(Event).where(Event.id == settings.active_event_id)
     if lock:
         query = query.with_for_update()
-    event = db.scalar(query)
+    event = db.scalar(query.execution_options(populate_existing=True))
     if event is None:
         raise HTTPException(
             503, "The application event is unavailable. Please retry later."
         )
+    if event.cleanup_started_at is not None or utc(
+        event.data_delete_at
+    ) <= datetime.now(UTC):
+        raise HTTPException(410, "This event is no longer available.")
     return event
 
 
@@ -137,6 +141,12 @@ def audit(db, actor_id, event_id, entity_id, action, changes, reason=""):
 
 def replace_input(db: Session, record: CreatorApplication, data: ApplicationInput):
     data.validate()
+    hidden = {
+        (channel.platform, channel.normalized_account): channel.publicly_hidden
+        for channel in db.scalars(
+            select(CreatorChannel).where(CreatorChannel.application_id == record.id)
+        )
+    }
     for name in ("livestream", "shorts", "vlogs"):
         setattr(record, name, name.upper() in data.content_types)
     db.execute(delete(CreatorChannel).where(CreatorChannel.application_id == record.id))
@@ -152,6 +162,9 @@ def replace_input(db: Session, record: CreatorApplication, data: ApplicationInpu
                 normalized_account=channel.normalized_account,
                 canonical_url=channel.canonical_url,
                 is_primary=channel.is_primary,
+                publicly_hidden=hidden.get(
+                    (channel.platform, channel.normalized_account), False
+                ),
             )
         )
     for i, url in enumerate(data.videos):
@@ -164,6 +177,9 @@ async def submit(
     data: ApplicationInput,
     registration: RegistrationClient,
     identity: IdentityProfileClient,
+    *,
+    picture: bytes | None = None,
+    store=None,
 ) -> int:
     data.validate()
     event = active_event(db)
@@ -174,33 +190,67 @@ async def submit(
         )  # Repeated submit never edits or creates another application.
     if not window_open(event, datetime.now(UTC)):
         raise HTTPException(409, "The application window is closed.")
-    lookup, result, email = await verified_snapshot(db, user_id, registration, identity)
-    with db.begin():
-        event = active_event(db, lock=True)
-        if (event.id, event.year) != (lookup.event_id, lookup.event_year):
-            raise HTTPException(409, "The active event changed. Reload and retry.")
-        existing = application_for_user(db, user_id, event.id)
-        if existing:
-            return existing.id
-        now = datetime.now(UTC)
-        if not window_open(event, now):
-            raise HTTPException(409, "The application window is closed.")
-        record = CreatorApplication(
-            user_id=user_id,
-            event_id=event.id,
-            reg_id=result.reg_id,
-            nickname=result.nickname,
-            email=email,
-            eligibility_checked_at=now,
-            livestream="LIVESTREAM" in data.content_types,
-            shorts="SHORTS" in data.content_types,
-            vlogs="VLOGS" in data.content_types,
+    if not picture or store is None:
+        raise HTTPException(
+            422, "A PNG profile picture is required when submitting your application."
         )
-        db.add(record)
-        db.flush()
-        replace_input(db, record, data)
-        audit(db, user_id, event.id, record.id, "submitted", {"status": "NEW"})
-        return record.id
+    lookup, result, email = await verified_snapshot(db, user_id, registration, identity)
+    from app.creators.images import (
+        attach_picture,
+        discard_staged_picture,
+        stage_picture,
+    )
+    from app.creators.models import CreatorProfile
+
+    def upload_context():
+        current = active_event(db, lock=True)
+        if (current.id, current.year) != (lookup.event_id, lookup.event_year):
+            raise HTTPException(409, "The active event changed. Reload and retry.")
+        if not window_open(current, datetime.now(UTC)):
+            raise HTTPException(409, "The application window is closed.")
+        return current
+
+    image_id = stage_picture(db, picture, store, upload_context)
+    try:
+        with db.begin():
+            event = active_event(db, lock=True)
+            if (event.id, event.year) != (lookup.event_id, lookup.event_year):
+                raise HTTPException(409, "The active event changed. Reload and retry.")
+            existing = application_for_user(db, user_id, event.id)
+            if existing:
+                return existing.id
+            now = datetime.now(UTC)
+            if not window_open(event, now):
+                raise HTTPException(409, "The application window is closed.")
+            record = CreatorApplication(
+                user_id=user_id,
+                event_id=event.id,
+                reg_id=result.reg_id,
+                nickname=result.nickname,
+                email=email,
+                eligibility_checked_at=now,
+                livestream="LIVESTREAM" in data.content_types,
+                shorts="SHORTS" in data.content_types,
+                vlogs="VLOGS" in data.content_types,
+            )
+            db.add(record)
+            db.flush()
+            replace_input(db, record, data)
+            profile = CreatorProfile(application_id=record.id)
+            db.add(profile)
+            attach_picture(db, profile, image_id, event.id)
+            audit(
+                db,
+                user_id,
+                event.id,
+                record.id,
+                "submitted",
+                {"status": "NEW", "picture_supplied": True},
+            )
+            return record.id
+    finally:
+        # ACTIVE images stay attached; duplicate submits/failed commits leave no live orphan.
+        discard_staged_picture(db, store, image_id)
 
 
 def edit(
@@ -279,6 +329,22 @@ async def review(
             raise HTTPException(
                 409, "The application changed. Reload before reviewing."
             )
+        if target == "APPROVED" or (
+            target == "ON_REVIEW" and record.status != "APPROVED"
+        ):
+            from app.creators.models import CreatorProfile, ProfileImage
+
+            profile = db.get(CreatorProfile, record.id)
+            image = (
+                db.get(ProfileImage, profile.image_id)
+                if profile and profile.image_id
+                else None
+            )
+            if image is None or image.state != "ACTIVE" or image.event_id != event.id:
+                raise HTTPException(
+                    409,
+                    "A valid profile picture is required before review or approval.",
+                )
         previous = record.status
         if target not in TRANSITIONS[previous]:
             raise HTTPException(409, "This status transition is not allowed.")

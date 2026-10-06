@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,8 +23,14 @@ def test_identity_migration_upgrade_downgrade_and_metadata(tmp_path):
         )
         assert result.returncode == 0, result.stdout + result.stderr
 
-    alembic("upgrade", "head")
+    alembic("upgrade", "6cf2b87d401a")
     engine = create_engine(url)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO local_users (id) VALUES (1), (2)"))
+    alembic("upgrade", "head")
+    with engine.connect() as connection:
+        keys = list(connection.scalars(text("SELECT session_key FROM local_users")))
+        assert len(set(keys)) == 2 and all(len(key) == 32 for key in keys)
     schema = inspect(engine)
     assert {"events", "local_users", "external_identities"} <= set(
         schema.get_table_names()

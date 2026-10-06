@@ -1,0 +1,21 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "creators.name" . }}-migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-weight: "-10"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
+  template:
+    spec:
+      {{- include "creators.pod" . | nindent 6 }}
+      restartPolicy: Never
+      containers:
+        - name: migration
+          {{- include "creators.container" . | nindent 10 }}
+          command: [python, -m, alembic, upgrade, head]
+{{- end }}

@@ -166,7 +166,9 @@ def snapshot(db, event_id):
         ],
         "Profiles": [
             {
-                **project(p, "application_id channel_name image_id"),
+                **project(
+                    p, "application_id channel_name image_id public_id publicly_hidden"
+                ),
                 "picture_filename": picture_filename(
                     primary[p.application_id], p.application_id
                 )

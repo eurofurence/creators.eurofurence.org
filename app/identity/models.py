@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -8,6 +10,7 @@ class LocalUser(Base):
     __tablename__ = "local_users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    session_key: Mapped[str] = mapped_column(default=lambda: uuid4().hex, unique=True)
 
 
 class ExternalIdentity(Base):

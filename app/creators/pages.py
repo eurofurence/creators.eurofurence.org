@@ -168,6 +168,13 @@ async def picture(
         )
     finally:
         await form.close()
+    if db.get(CreatorApplication, application_id).status != "APPROVED":
+        return RedirectResponse(
+            f"/admin/applications/{application_id}"
+            if policy(form)["administrative"]
+            else "/applications",
+            status_code=303,
+        )
     return return_to_creator(application_id, policy(form)["administrative"])
 
 

@@ -13,7 +13,7 @@ from app import storage
 from app.applications.workflow import utc
 from app.config import settings
 from app.creators.models import CreatorProfile, ProfileImage
-from app.creators.service import profile_context
+from app.creators.service import picture_context
 from app.events.models import Event
 from app.helpers.service import record_change, touch
 
@@ -82,43 +82,74 @@ def normalize_png(data: bytes) -> bytes:
         ) from None
 
 
-def replace_picture(db, actor_id, application_id, version, data, store, **policy):
+def stage_picture(db, data, store, context):
+    """Authorize first; persist an orphan-cleanup reference before external upload."""
     db.rollback()
-    # Authorize before decoding or contacting storage; persist a recoverable object intent.
     with db.begin():
-        event, _, _ = profile_context(
-            db, actor_id, application_id, version=version, **policy
-        )
-        event_id = event.id
+        event_id = context().id
     normalized = normalize_png(data)
-    key = f"profiles/{uuid4().hex}.png"
     with db.begin():
+        if context().id != event_id:
+            raise HTTPException(409, "The active event changed. Reload and retry.")
         image = ProfileImage(
             event_id=event_id,
-            object_key=key,
+            object_key=f"profiles/{uuid4().hex}.png",
             state="STAGED",
             delete_after=datetime.now(UTC) + timedelta(hours=1),
         )
         db.add(image)
         db.flush()
-        image_id = image.id
+        image_id, key = image.id, image.object_key
     try:
         store.put(key, normalized)
+    except Exception as error:
+        discard_staged_picture(db, store, image_id)
+        if isinstance(error, ImageStorageUnavailable):
+            raise HTTPException(
+                503,
+                "Image storage is unavailable. Please retry; your previous data is unchanged.",
+            ) from None
+        raise
+    return image_id
+
+
+def attach_picture(db, profile, image_id, event_id):
+    image = db.get(ProfileImage, image_id, with_for_update=True)
+    if (
+        image is None
+        or image.event_id != event_id
+        or image.state != "STAGED"
+        or datetime.now(UTC) >= utc(image.delete_after)
+    ):
+        raise HTTPException(409, "Upload expired. Please retry.")
+    old = db.get(ProfileImage, profile.image_id) if profile.image_id else None
+    if old:
+        old.state, old.delete_after = "DELETE", datetime.now(UTC)
+    profile.image_id, image.state = image.id, "ACTIVE"
+
+
+def discard_staged_picture(db, store, image_id):
+    db.rollback()
+    with db.begin():
+        image = db.get(ProfileImage, image_id, with_for_update=True)
+        if image and image.state != "ACTIVE":
+            image.state, image.delete_after = "DELETE", datetime.now(UTC)
+    cleanup_images(db, store, image_id=image_id)
+
+
+def replace_picture(db, actor_id, application_id, version, data, store, **policy):
+    def context():
+        return picture_context(db, actor_id, application_id, version=version, **policy)[
+            0
+        ]
+
+    image_id = stage_picture(db, data, store, context)
+    try:
         with db.begin():
-            _, application, profile = profile_context(
+            event, application, profile = picture_context(
                 db, actor_id, application_id, version=version, **policy
             )
-            image = db.get(ProfileImage, image_id, with_for_update=True)
-            if (
-                image is None
-                or image.state != "STAGED"
-                or datetime.now(UTC) >= utc(image.delete_after)
-            ):
-                raise HTTPException(409, "Upload expired. Please retry.")
-            old = db.get(ProfileImage, profile.image_id) if profile.image_id else None
-            if old:
-                old.state, old.delete_after = "DELETE", datetime.now(UTC)
-            profile.image_id, image.state = image.id, "ACTIVE"
+            attach_picture(db, profile, image_id, event.id)
             touch(application)
             record_change(
                 db,
@@ -133,24 +164,13 @@ def replace_picture(db, actor_id, application_id, version, data, store, **policy
                 },
                 policy.get("reason", ""),
             )
-    except Exception as error:
-        db.rollback()
-        # The committed STAGED record also survives a DB outage or process crash.
-        with db.begin():
-            image = db.get(ProfileImage, image_id)
-            if image and image.state != "ACTIVE":
-                image.state, image.delete_after = "DELETE", datetime.now(UTC)
-        cleanup_images(db, store, image_id=image_id)
-        if isinstance(error, ImageStorageUnavailable):
-            raise HTTPException(
-                503,
-                "Image storage is unavailable. Your previous picture is unchanged; retry later.",
-            ) from None
+    except Exception:
+        discard_staged_picture(db, store, image_id)
         raise
     cleanup_images(db, store)
 
 
-def cleanup_images(db, store, *, image_id=None):
+def cleanup_images(db, store, *, image_id=None, event_id=None):
     """Retry orphan/replaced objects and expired event images; return failure count."""
     db.rollback()
     now = datetime.now(UTC)
@@ -164,6 +184,8 @@ def cleanup_images(db, store, *, image_id=None):
     )
     if image_id is not None:
         query = query.where(ProfileImage.id == image_id)
+    if event_id is not None:
+        query = query.where(ProfileImage.event_id == event_id)
     ids = list(db.scalars(query))
     db.rollback()
     failures = 0
@@ -194,7 +216,9 @@ def cleanup_images(db, store, *, image_id=None):
                     image.deletion_failed = True
         else:
             with db.begin():
-                image = db.get(ProfileImage, key_id)
+                image = db.get(
+                    ProfileImage, key_id, with_for_update=True, populate_existing=True
+                )
                 if image:
                     db.delete(image)
     return failures

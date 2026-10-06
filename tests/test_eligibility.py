@@ -133,7 +133,11 @@ def eligibility_setup(monkeypatch):
         app.dependency_overrides[get_registration_client] = lambda: adapter
         try:
             with TestClient(app, base_url="http://127.0.0.1:8000") as client:
-                payload = base64.b64encode(json.dumps({"user_id": 1}).encode())
+                payload = base64.b64encode(
+                    json.dumps(
+                        {"user_id": 1, "identity_key": db.get(LocalUser, 1).session_key}
+                    ).encode()
+                )
                 cookie = (
                     TimestampSigner(settings.session_secret.get_secret_value())
                     .sign(payload)
