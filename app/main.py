@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.applications.routes import router as applications_router
 from app.auth.routes import router as auth_router
 from app.config import settings
 
@@ -25,6 +26,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(applications_router)
 
 
 @app.get("/health")

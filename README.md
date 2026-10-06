@@ -29,6 +29,12 @@ Login requires `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_ISSUER_URL`,
 match the registered callback. Open the application on the same origin.
 The current login requests only `openid`.
 
+Set `ACTIVE_EVENT_ID` to the local database ID of the application event.
+Authenticated `GET /applications/eligibility` checks the current user for that
+event. Missing event configuration or unavailable Registration verification returns
+HTTP 503 with `UNAVAILABLE` and `retryable: true`. The Registration adapter is
+currently unavailable until the EF contract and access are supplied.
+
 Set `DATABASE_URL` and the `S3_*` settings for your environment. Docker service
 hostnames work inside the development network; host-side development must use
 the published ports in `docker-compose.yml`.
