@@ -36,16 +36,19 @@ def csrf_form(request: Request, data=None) -> CSRFForm:
     )
 
 
-async def protected_form(request: Request):
+async def protected_form(request: Request, *, upload=False):
     # Bound the body before form parsing, including chunked requests.
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
-        if len(body) > 65536:
+        if len(body) > (settings.profile_image_max_bytes + 65536 if upload else 65536):
             raise HTTPException(413, "Form is too large")
     request._body = bytes(body)
-    data = await request.form(max_files=0, max_fields=300, max_part_size=65536)
+    data = await request.form(
+        max_files=1 if upload else 0, max_fields=300, max_part_size=65536
+    )
     if not csrf_form(request, data).validate():
+        await data.close()
         raise HTTPException(
             403, "Invalid or expired form. Reload the page and try again."
         )

@@ -41,6 +41,11 @@ have no change deadline after migration; approval changes fail closed until it i
 configured. `BADGE_SEQUENCE_START` defaults to 1 and only affects creation of a
 new event counter.
 
+Interpret local event deadlines in `Europe/Berlin` (including summer-time offset)
+and convert them to UTC before storing them. `badge_print_at` is the physical
+print timestamp; it does not control editing. Set the event's `helper_limit` to
+NULL for unlimited helpers or a nonnegative integer for a per-creator limit.
+
 Set `DATABASE_URL` and the `S3_*` settings for your environment. Docker service
 hostnames work inside the development network; host-side development must use
 the published ports in `docker-compose.yml`.
@@ -69,6 +74,24 @@ the authenticated local user ID. `POST /auth/logout` clears the local session.
 `/admin/applications`. Submission and approval require available Registration
 verification. Trusted email is shown as unavailable until its integration is
 configured. Review notifications are queued; delivery is not yet implemented.
+
+Approved creators manage profiles, pictures and invitations from the dashboard.
+Helpers use `/helpers`. Invitation links require the helper's own login; their
+secret stays in the URL fragment until the registration form is submitted.
+Configure private S3 for pictures. `PROFILE_IMAGE_MAX_BYTES` defaults to 10485760
+(10 MiB); `INVITATION_ATTEMPTS_PER_MINUTE` defaults to 10 per signed-in user.
+
+Run image cleanup periodically in a separate process using the same DB/S3
+configuration. It retries failed deletions, removes replaced/abandoned uploads,
+and deletes images when their event reaches `data_delete_at`. A nonzero exit
+status means deletions remain pending and the command should be retried:
+
+```sh
+python -m app.creators.images
+```
+
+Run this successfully before deleting event records. This command handles image
+assets only; full event/person cleanup and notification delivery remain pending.
 
 An operator with database access explicitly grants or revokes ADMIN after the
 target user has logged in. Use the verified issuer and subject, not a local

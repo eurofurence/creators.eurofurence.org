@@ -6,6 +6,7 @@ from app.applications.pages import static as application_static
 from app.applications.routes import router as applications_router
 from app.auth.routes import router as auth_router
 from app.config import settings
+from app.creators.pages import router as creators_router
 
 if settings.session_secret is None or (
     len(settings.session_secret.get_secret_value()) < 32
@@ -30,6 +31,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(applications_router)
 app.include_router(pages_router)
+app.include_router(creators_router)
 app.mount("/application-assets", application_static, name="application-assets")
 
 

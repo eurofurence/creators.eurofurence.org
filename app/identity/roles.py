@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.applications.models import BusinessAudit, LocalRoleAssignment
 from app.database import SessionLocal
 from app.events.models import Event  # noqa: F401
+from app.helpers import models as helper_models  # noqa: F401
 from app.identity.models import ExternalIdentity
 
 

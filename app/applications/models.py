@@ -25,6 +25,7 @@ class CreatorApplication(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "event_id", name="uq_application_user_event"),
         UniqueConstraint("id", "event_id", name="uq_application_id_event"),
+        UniqueConstraint("id", "event_id", "user_id", name="uq_application_owner"),
         CheckConstraint(
             "status IN ('NEW','ON_REVIEW','APPROVED','NOT_APPROVED','NOT_ACCEPTED')",
             name="ck_application_status",
@@ -43,6 +44,7 @@ class CreatorApplication(Base):
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(default="NEW")
     version: Mapped[int] = mapped_column(default=1)
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     livestream: Mapped[bool] = mapped_column(Boolean, default=False)
     shorts: Mapped[bool] = mapped_column(Boolean, default=False)
     vlogs: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -150,9 +152,20 @@ class Badge(Base):
             ondelete="CASCADE",
         ),
         CheckConstraint("badge_number > 0", name="ck_badge_positive"),
+        CheckConstraint(
+            "(application_id IS NOT NULL AND helper_id IS NULL) OR (application_id IS NULL AND helper_id IS NOT NULL)",
+            name="ck_badge_owner",
+        ),
+        ForeignKeyConstraint(
+            ["helper_id", "event_id"],
+            ["helper_registrations.id", "helper_registrations.event_id"],
+            ondelete="CASCADE",
+            name="fk_badge_helper_event",
+        ),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
-    application_id: Mapped[int] = mapped_column(unique=True)
+    application_id: Mapped[int | None] = mapped_column(unique=True)
+    helper_id: Mapped[int | None] = mapped_column(unique=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
     badge_number: Mapped[int]
     assigned_at: Mapped[datetime] = mapped_column(
@@ -185,7 +198,9 @@ class NotificationOutbox(Base):
         UniqueConstraint(
             "application_id",
             "application_version",
-            name="uq_outbox_application_version",
+            "recipient_id",
+            "notification_type",
+            name="uq_outbox_change_recipient_type",
         ),
     )
     id: Mapped[int] = mapped_column(primary_key=True)

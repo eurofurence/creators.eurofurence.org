@@ -2,6 +2,7 @@
 {% block content %}<h1>Review application</h1>
 <dl><dt>Reg-ID</dt><dd>{{ record.reg_id or 'Unavailable' }}</dd><dt>Nickname</dt><dd>{{ record.nickname or 'Unavailable' }}</dd><dt>Email</dt><dd>{{ record.email or 'Unavailable' }}</dd></dl>
 {% include "details.html" %}
+<p><a href="/creators/{{ record.id }}?administrative=true">Manage creator profile, helpers and participation</a></p>
 <form method="post">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}">
 <label>Next status <select name="status">{% for status in transitions %}<option>{{ status }}</option>{% endfor %}</select></label>
 <label>Applicant-visible reason (required for rejection or approval reversal)<textarea name="reason" maxlength="4000"></textarea></label>

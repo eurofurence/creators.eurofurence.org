@@ -5,8 +5,10 @@ from sqlalchemy import engine_from_config, pool
 
 from app.applications import models  # noqa: F401
 from app.config import settings
+from app.creators import models as creator_models  # noqa: F401
 from app.database import Base
 from app.events.models import Event  # noqa: F401
+from app.helpers import models as helper_models  # noqa: F401
 from app.identity.models import ExternalIdentity, LocalUser  # noqa: F401
 
 config = context.config

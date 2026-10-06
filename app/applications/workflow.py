@@ -1,13 +1,11 @@
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.applications.input import ApplicationInput
 from app.applications.models import (
-    Badge,
-    BadgeCounter,
     BusinessAudit,
     ConventionVideo,
     CreatorApplication,
@@ -54,6 +52,7 @@ def window_open(event: Event, now: datetime) -> bool:
 def applicant_can_edit(event: Event, record: CreatorApplication, now: datetime) -> bool:
     return (
         record.status == "NEW"
+        and record.withdrawn_at is None
         and window_open(event, now)
         and (
             event.badge_change_deadline_at is None
@@ -323,39 +322,21 @@ async def review(
         )
         record.version += 1
         record.updated_at = now
-        if (
-            target == "APPROVED"
-            and db.scalar(select(Badge).where(Badge.application_id == record.id))
-            is None
-        ):
-            # The event row is locked for every allocation, including first counter creation.
-            if db.get(BadgeCounter, event.id) is None:
-                db.add(
-                    BadgeCounter(
-                        event_id=event.id, next_number=settings.badge_sequence_start
-                    )
+        from app.badges.service import allocate
+        from app.creators.models import CreatorProfile
+        from app.helpers.service import creator_activity_changed
+
+        if target == "APPROVED":
+            if record.withdrawn_at is not None:
+                raise HTTPException(
+                    409, "Restore the withdrawn application before approving it."
                 )
-                db.flush()
-            number = (
-                db.scalar(
-                    update(BadgeCounter)
-                    .where(BadgeCounter.event_id == event.id)
-                    .values(next_number=BadgeCounter.next_number + 1)
-                    .returning(BadgeCounter.next_number)
-                )
-                - 1
-            )
-            db.add(
-                Badge(application_id=record.id, event_id=event.id, badge_number=number)
-            )
-            audit(
-                db,
-                actor_id,
-                event.id,
-                record.id,
-                "badge_allocated",
-                {"badge_number": number},
-            )
+            allocate(db, event.id, actor_id, application_id=record.id)
+            if db.get(CreatorProfile, record.id) is None:
+                db.add(CreatorProfile(application_id=record.id))
+            creator_activity_changed(db, actor_id, record, True, reason)
+        elif previous == "APPROVED":
+            creator_activity_changed(db, actor_id, record, False, reason)
         audit(
             db,
             actor_id,

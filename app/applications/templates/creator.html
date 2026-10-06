@@ -1,0 +1,25 @@
+{% extends "base.html" %}{% block content %}
+<h1>Creator profile and helpers</h1>
+<p>Application: {{ record.status }}. Participation: {{ 'Withdrawn' if record.withdrawn_at else ('Active' if active else 'Inactive') }}.</p>
+<p>Change deadline: {{ event.badge_change_deadline_at or 'Not configured' }} (UTC).</p>
+{% if not editable %}<p>Normal profile and helper changes are currently locked.</p>{% endif %}
+{% if profile and profile.image_id %}<img src="/creators/{{ record.id }}/picture" alt="Your current profile picture" width="200" height="200">{% endif %}
+{% if banned %}<p role="alert">Banned-account warning: {{ banned|length }} publication account(s) match active moderation records. Approval is not automatically changed.</p>{% endif %}
+{% if active and (editable or administrative) %}
+<form method="post" action="/creators/{{ record.id }}/profile">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}">
+<label>Public creator/channel name <input name="channel_name" required maxlength="200" value="{{ profile.channel_name if profile else '' }}"></label>
+<fieldset><legend>Publication channels</legend><p>All channels share the single display name above. Choose exactly one primary for the badge link.</p>
+<div id="channels">{% for channel in channels %}<div class="channel"><label>Platform <select name="platform">{% for platform in platforms %}<option {% if channel.platform == platform %}selected{% endif %}>{{ platform }}</option>{% endfor %}</select></label><label>Handle / account URL <input name="account" maxlength="2048" value="{{ channel.original_representation }}"></label><label><input type="radio" name="primary" value="{{ loop.index0 }}" {% if channel.is_primary %}checked{% endif %}>Primary</label><button type="button" class="remove-channel">Remove</button></div>{% endfor %}</div><button type="button" id="add-channel">Add channel</button></fieldset>
+{% include "admin_policy.html" %}<button>Save profile</button></form>
+<form method="post" enctype="multipart/form-data" action="/creators/{{ record.id }}/picture">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}"><label>Profile picture (PNG, exactly 600×600) <input type="file" name="picture" accept="image/png" required></label>{% include "admin_policy.html" %}<button>Replace picture</button></form>
+{% endif %}
+<h2>Invitations</h2><p>Links are single-use and shown once. Resend to replace a lost unused link.</p>
+{% if editable %}<form method="post" action="/creators/{{ record.id }}/invitations">{{ csrf.csrf_token }}{% include "admin_policy.html" %}<button>Create invitation</button></form>{% endif %}
+<ul>{% for invitation in invitations %}<li>{{ invitation.state }}; expires {{ invitation.expires_at }} UTC.
+{% if invitation.state in ('Available', 'Expired') and editable %}<form method="post" action="/creators/{{ record.id }}/invitations">{{ csrf.csrf_token }}<input type="hidden" name="replace_id" value="{{ invitation.id }}">{% include "admin_policy.html" %}<button>Resend with a new link</button></form>{% endif %}
+{% if invitation.state == 'Available' and not administrative %}<form method="post" action="/invitations/{{ invitation.id }}/revoke">{{ csrf.csrf_token }}<button>Revoke invitation</button></form>{% endif %}</li>{% else %}<li>No invitations yet.</li>{% endfor %}</ul>
+<h2>Helpers</h2><ul>{% for helper in helpers %}<li>{{ helper.nickname or 'Nickname unavailable' }} — {{ helper.status }}; {{ 'withdrawn' if helper.withdrawn else ('active' if helper.active else 'inactive/pending') }}.
+{% if not helper.withdrawn and active and (editable or administrative) %}<form method="post" action="/helpers/{{ helper.id }}/decision">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ helper.version }}"><label>Decision <select name="status"><option>CONFIRMED</option><option>DECLINED</option></select></label>{% include "admin_policy.html" %}<button>Apply helper decision</button></form>{% endif %}
+{% if administrative %}<form method="post" action="/participation/helper/{{ helper.id }}">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ helper.version }}"><input type="hidden" name="action" value="{{ 'restore' if helper.withdrawn else 'withdraw' }}">{% include "admin_policy.html" %}<button>{{ 'Restore' if helper.withdrawn else 'Withdraw' }} helper</button></form>{% endif %}</li>{% else %}<li>No helper requests yet.</li>{% endfor %}</ul>
+{% if not record.withdrawn_at or administrative %}<form method="post" action="/participation/creator/{{ record.id }}">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}"><input type="hidden" name="action" value="{{ 'restore' if record.withdrawn_at else 'withdraw' }}">{% include "admin_policy.html" %}<button>{{ 'Restore participation' if record.withdrawn_at else 'Withdraw participation' }}</button></form>{% endif %}
+{% if active and (editable or administrative) %}<script src="/application-assets/forms.js" defer></script>{% endif %}{% endblock %}

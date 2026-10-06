@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     environment: str = "development"
     active_event_id: int | None = Field(default=None, gt=0)
     badge_sequence_start: int = Field(default=1, gt=0)
+    profile_image_max_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
+    invitation_attempts_per_minute: int = Field(default=10, gt=0)
 
     session_secret: SecretStr | None = None
     session_max_age: int = Field(default=14 * 24 * 60 * 60, gt=0)
