@@ -3,9 +3,10 @@ from sqlalchemy import delete, select
 
 from app.applications.models import CreatorChannel
 from app.applications.workflow import active_event, get_application
-from app.creators.models import BannedChannel, CreatorProfile
+from app.creators.models import CreatorProfile
 from app.creators.policy import authorize, change_allowed, check_version, require_active
 from app.helpers.service import record_change, touch
+from app.moderation.service import warnings
 
 
 def profile_context(
@@ -35,18 +36,7 @@ def profile_context(
 
 
 def banned_matches(db, application_id):
-    return db.scalars(
-        select(CreatorChannel)
-        .join(
-            BannedChannel,
-            (BannedChannel.platform == CreatorChannel.platform)
-            & (BannedChannel.normalized_account == CreatorChannel.normalized_account),
-        )
-        .where(
-            CreatorChannel.application_id == application_id,
-            BannedChannel.active.is_(True),
-        )
-    ).all()
+    return warnings(db, application_id)
 
 
 def save_profile(

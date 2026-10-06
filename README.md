@@ -73,7 +73,7 @@ the authenticated local user ID. `POST /auth/logout` clears the local session.
 `/applications` provides the creator dashboard and form. Administrators use
 `/admin/applications`. Submission and approval require available Registration
 verification. Trusted email is shown as unavailable until its integration is
-configured. Review notifications are queued; delivery is not yet implemented.
+configured. Review notifications are queued for the separate notification worker.
 
 Approved creators manage profiles, pictures and invitations from the dashboard.
 Helpers use `/helpers`. Invitation links require the helper's own login; their
@@ -91,7 +91,33 @@ python -m app.creators.images
 ```
 
 Run this successfully before deleting event records. This command handles image
-assets only; full event/person cleanup and notification delivery remain pending.
+assets only; full event/person cleanup remains pending.
+
+Staff use `/staff` to select an authorized event for Reg-ID lookup and per-badge
+pickup. ADMIN can undo accidental pickup, manage banned channels, inspect failed
+notifications, download profile PNGs and generate operational XLSX exports.
+Print-ready exports require fresh Registration checks and complete profile assets.
+Operations-only workbooks remain available for diagnosis and are explicitly not
+print-ready. Both include private operational data and must be handled accordingly.
+
+Run notification delivery in a separate process with the same database settings:
+
+```sh
+python -m app.notifications.worker
+```
+
+Set `NOTIFICATION_PROVIDER_FACTORY` to a trusted installed `module:factory`
+implementing `app.notifications.client.NotificationProvider` after EF approves
+notification access, registered Operational type keys and recipient mapping.
+No live EF transport is bundled while that contract is unconfirmed. Unset
+configuration explicitly reports provider unavailable; there is no SMTP fallback.
+The worker processes at most 100 due items, retries up to five attempts with
+backoff/Retry-After, and exposes failures at `/admin/notifications`. It exits nonzero
+for unavailable configuration or terminal failed items. Schedule repeated runs to
+process retries. Provider calls must be asynchronous and bounded; the worker uses
+a 60-second timeout and a five-minute recovery lease. An interrupted delivery after
+provider acceptance can be retried, so the approved adapter should use the stable
+delivery identifier for provider deduplication if the real contract supports it.
 
 An operator with database access explicitly grants or revokes ADMIN after the
 target user has logged in. Use the verified issuer and subject, not a local
@@ -100,6 +126,8 @@ numeric user ID. No user is automatically promoted:
 ```sh
 python -m app.identity.roles grant-admin --issuer "$OIDC_ISSUER_URL" --subject "TARGET_SUBJECT" --reason "Initial administrator"
 python -m app.identity.roles revoke-admin --issuer "$OIDC_ISSUER_URL" --subject "TARGET_SUBJECT" --reason "Access removed"
+python -m app.identity.roles grant-badge-staff --issuer "$OIDC_ISSUER_URL" --subject "TARGET_SUBJECT" --event-id 1 --reason "Pickup shift"
+python -m app.identity.roles revoke-badge-staff --issuer "$OIDC_ISSUER_URL" --subject "TARGET_SUBJECT" --event-id 1 --reason "Shift ended"
 ```
 
 To stop local services while preserving database data:

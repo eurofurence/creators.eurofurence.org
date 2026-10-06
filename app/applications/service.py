@@ -8,12 +8,13 @@ from app.registration.client import RegistrationLookup
 
 
 def registration_lookup_for_user(
-    db: Session, user_id: int
+    db: Session, user_id: int, *, event_id: int | None = None
 ) -> RegistrationLookup | None:
     """Resolve server-owned identity and configured event, never caller-supplied IDs."""
-    if settings.active_event_id is None or not settings.oidc_issuer_url:
+    event_id = settings.active_event_id if event_id is None else event_id
+    if event_id is None or not settings.oidc_issuer_url:
         return None
-    event = db.get(Event, settings.active_event_id)
+    event = db.get(Event, event_id)
     if event is None:
         return None
     identities = db.scalars(

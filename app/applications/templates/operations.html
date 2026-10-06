@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block content %}
+<h1>Operational exports — {{ event.name }}</h1>
+{% if error %}<section role="alert"><h2>Export blocked</h2>{% if error is mapping %}<p>{{ error.message }}</p><ul>{% for p in error.problems %}<li>Badge {{ p.number or 'unallocated' }} (record {{ p.badge_id or 'missing' }}, application {{ p.application_id }}{% if p.helper_id %}, helper {{ p.helper_id }}{% endif %}): {{ p.problem }}</li>{% endfor %}</ul>{% else %}<p>{{ error }}</p>{% endif %}</section>{% endif %}
+<p>The workbook includes private attendee information, staff notes and audit records. Keep the downloaded file accessible only to authorized operations staff.</p>
+<form method="post" action="/admin/events/{{ event.id }}/export">{{ csrf.csrf_token }}<button name="mode" value="print">Validate and download print-ready XLSX</button><button name="mode" value="operations">Download operations-only XLSX</button></form>
+<p>Operations-only output contains diagnostic records and is not validated for printing. Profile pictures can be downloaded from each application's review page.</p>
+{% endblock %}

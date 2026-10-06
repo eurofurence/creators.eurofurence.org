@@ -170,6 +170,8 @@ def admin_list(request: Request, db: DB, user: User):
 
 @router.get("/admin/applications/{application_id}")
 def admin_detail(application_id: int, request: Request, db: DB, user: User):
+    from app.moderation.service import warnings
+
     require_admin(db, user.id)
     event = workflow.active_event(db)
     record = workflow.get_application(db, application_id, event.id)
@@ -177,6 +179,7 @@ def admin_detail(application_id: int, request: Request, db: DB, user: User):
         request,
         "admin_detail.html",
         transitions=workflow.TRANSITIONS[record.status],
+        banned=warnings(db, record.id),
         **details(db, record),
     )
 

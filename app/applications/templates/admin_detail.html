@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% block content %}<h1>Review application</h1>
+{% for ban in banned %}<p role="alert">Banned channel warning: {{ ban.platform }} / {{ ban.normalized_account }} — {{ ban.private_reason }}. This warning does not prevent an administrative approval.</p>{% endfor %}
+<p><a href="/admin/pictures/{{ record.id }}">Download profile picture</a></p>
 <dl><dt>Reg-ID</dt><dd>{{ record.reg_id or 'Unavailable' }}</dd><dt>Nickname</dt><dd>{{ record.nickname or 'Unavailable' }}</dd><dt>Email</dt><dd>{{ record.email or 'Unavailable' }}</dd></dl>
 {% include "details.html" %}
 <p><a href="/creators/{{ record.id }}?administrative=true">Manage creator profile, helpers and participation</a></p>

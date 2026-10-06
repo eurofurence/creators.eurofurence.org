@@ -168,6 +168,10 @@ class Badge(Base):
     helper_id: Mapped[int | None] = mapped_column(unique=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
     badge_number: Mapped[int]
+    picked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    picked_up_by: Mapped[int | None] = mapped_column(
+        ForeignKey("local_users.id", ondelete="SET NULL")
+    )
     assigned_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow
     )
@@ -195,6 +199,10 @@ class BusinessAudit(Base):
 class NotificationOutbox(Base):
     __tablename__ = "notification_outbox"
     __table_args__ = (
+        CheckConstraint(
+            "state IN ('PENDING','SENDING','SENT','FAILED')", name="ck_outbox_state"
+        ),
+        CheckConstraint("attempts >= 0 AND attempts <= 5", name="ck_outbox_attempts"),
         UniqueConstraint(
             "application_id",
             "application_version",
@@ -215,6 +223,11 @@ class NotificationOutbox(Base):
     notification_type: Mapped[str]
     state: Mapped[str] = mapped_column(default="PENDING")
     attempts: Mapped[int] = mapped_column(default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claimed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claim_id: Mapped[str | None]
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow
     )

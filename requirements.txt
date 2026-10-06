@@ -17,6 +17,7 @@ alembic==1.19.2           # Database migrations
 # Storage
 boto3==1.43.92            # S3 client
 Pillow==12.3.0            # Decode, validate and normalize profile PNG images
+openpyxl==3.1.5           # On-demand operational XLSX exports
 
 # Authentication
 authlib==1.8.0            # OAuth 2.0 / OIDC

@@ -4,7 +4,7 @@
 <p>Change deadline: {{ event.badge_change_deadline_at or 'Not configured' }} (UTC).</p>
 {% if not editable %}<p>Normal profile and helper changes are currently locked.</p>{% endif %}
 {% if profile and profile.image_id %}<img src="/creators/{{ record.id }}/picture" alt="Your current profile picture" width="200" height="200">{% endif %}
-{% if banned %}<p role="alert">Banned-account warning: {{ banned|length }} publication account(s) match active moderation records. Approval is not automatically changed.</p>{% endif %}
+{% for ban in banned %}<p role="alert">Banned-account warning: {{ ban.platform }} / {{ ban.normalized_account }} — {{ ban.private_reason }}. Approval is not automatically changed.</p>{% endfor %}
 {% if active and (editable or administrative) %}
 <form method="post" action="/creators/{{ record.id }}/profile">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}">
 <label>Public creator/channel name <input name="channel_name" required maxlength="200" value="{{ profile.channel_name if profile else '' }}"></label>

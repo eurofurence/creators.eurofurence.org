@@ -1,0 +1,4 @@
+{% extends "base.html" %}{% block content %}
+<h1>Notification delivery</h1><p>Failed deliveries do not change application or helper decisions. Delivery stops after five attempts. Provider unavailable means notification transport or approved access is not configured.</p>
+<table><thead><tr><th>ID</th><th>Event</th><th>Application</th><th>Recipient</th><th>Type</th><th>State</th><th>Attempts</th><th>Next attempt</th><th>Accepted at</th><th>Problem</th></tr></thead><tbody>{% for row in rows %}<tr><td>{{ row.id }}</td><td>{{ row.event_id }}</td><td>{{ row.application_id }}</td><td>{{ row.recipient_id }}</td><td>{{ row.notification_type }}</td><td>{{ row.state }}</td><td>{{ row.attempts }}</td><td>{{ row.next_attempt_at or '' }}</td><td>{{ row.sent_at or '' }}</td><td>{{ row.last_error or '' }}</td></tr>{% endfor %}</tbody></table>
+{% endblock %}

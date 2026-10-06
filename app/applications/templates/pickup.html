@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block content %}
+<h1>Badge pickup — {{ event.name }}</h1>
+<form method="post" action="/staff/events/{{ event.id }}/badges">{{ csrf.csrf_token }}<label>Reg-ID <input name="reg_id" maxlength="200" required value="{{ reg_id }}"></label><button>Find badges</button></form>
+{% if reg_id and not rows %}<p>No badge records found for this Reg-ID.</p>{% endif %}
+{% for row in rows %}<section><h2>Badge {{ row.number }} — {{ row.kind }}</h2><p>Creator: {{ row.creator or 'Name unavailable' }} (application {{ row.application_id }}). {{ 'Active' if row.active else 'Inactive' }}.</p>
+<p>Pickup: {{ row.picked_up_at or 'Not collected' }}</p>
+{% if row.active and not row.picked_up_at %}<form method="post" action="/staff/events/{{ event.id }}/badges/{{ row.id }}">{{ csrf.csrf_token }}<button name="action" value="pickup">Mark this badge collected</button></form>{% endif %}
+{% if administrative and row.picked_up_at %}<form method="post" action="/staff/events/{{ event.id }}/badges/{{ row.id }}">{{ csrf.csrf_token }}<label>Correction reason <input name="reason" maxlength="4000" required></label><button name="action" value="undo">Undo accidental pickup</button></form>{% endif %}</section>{% endfor %}
+{% endblock %}
