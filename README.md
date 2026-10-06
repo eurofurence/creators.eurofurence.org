@@ -2,178 +2,85 @@
 
 Web application for managing Eurofurence Video Creator applications.
 
-# Development
+## Development setup
 
-The application is intended to run as a containerized service within the Eurofurence infrastructure.
+Use Docker Desktop, Visual Studio Code, and the Dev Containers extension.
+Open the repository and select **Dev Containers: Reopen in Container**.
+The container installs `requirements-dev.txt` with pip and starts the local
+PostgreSQL and S3-compatible services.
 
-Local development uses a VS Code Dev Container with PostgreSQL and an S3-compatible development storage provided through Docker Compose.
+For development outside the container, create and activate a Python 3.14 virtual
+environment, then install the development dependencies:
 
-
-## Prerequisites
-
-* Docker Desktop
-* Visual Studio Code
-* VS Code Dev Containers extension
-
-## Set up the development environment
-
-Clone the repository and open it in Visual Studio Code.
-
-Then open the repository in the Dev Container:
-
-1. Open the Command Palette (`Ctrl+Shift+P`).
-2. Select `Dev Containers: Reopen in Container`.
-3. Wait for the container setup to complete.
-
-Python dependencies from `requirements.txt` are installed automatically when the Dev Container is created.
-
-The PostgreSQL and S3 development services are started automatically when the Dev Container starts.
-
-If dependencies need to be installed manually, run:
-
-```bash
-python -m pip install -r requirements.txt
+```sh
+python -m pip install -r requirements-dev.txt
 ```
 
-## Configure the local environment
+Runtime dependencies are in `requirements.txt`.
 
-Create a local `.env` file based on `.env.example`.
+## Configuration
 
-```bash
-cp .env.example .env
+Copy `.env.example` to `.env` and configure it for your environment. Never commit
+the `.env` file or credentials. Set `SESSION_SECRET` to a unique random value of
+at least 32 characters.
+
+Login requires `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_ISSUER_URL`,
+`OIDC_SERVER_METADATA_URL`, and `OIDC_REDIRECT_URI`. The redirect URI must exactly
+match the registered callback. Open the application on the same origin.
+The current login requests only `openid`.
+
+Set `DATABASE_URL` and the `S3_*` settings for your environment. Docker service
+hostnames work inside the development network; host-side development must use
+the published ports in `docker-compose.yml`.
+
+The Dev Container creates the shared network automatically. To start services
+manually, create `creators-dev` if it does not exist, then run:
+
+```sh
+docker compose up -d db s3
 ```
 
-The `.env` file contains local configuration and secrets and must not be committed.
+## Run
 
-Set `SESSION_SECRET` to a unique random value of at least 32 characters before starting the application.
-The existing development OIDC client needs `OIDC_CLIENT_ID`,
-`OIDC_CLIENT_SECRET`, `OIDC_ISSUER_URL`, `OIDC_SERVER_METADATA_URL`, and
-`OIDC_REDIRECT_URI`. Set the redirect URI to the **exact** registered callback,
-including whether it uses `localhost` or `127.0.0.1`, and open the app on that
-same host. `.env.example` illustrates `http://127.0.0.1:8000/auth/callback`.
+Apply migrations before logging in, then start the development server:
 
-Authlib uses Authorization Code with PKCE S256 and the `openid` scope. Verified
-`(issuer, subject)` maps to a local user; the authenticated session contains
-only that local `user_id`. OAuth tokens are not retained. Apply the database
-migrations before testing login.
-
-See [Authentication](docs/AUTHENTICATION.md) for configuration, session behavior,
-and the real-client smoke-test checklist. Deployment remains milestone 5;
-Registration eligibility is separate from login.
-
-The default development configuration uses the Docker service names for PostgreSQL and S3:
-
-```dotenv
-DATABASE_URL="postgresql+psycopg://creators:creators@db:5432/creators"
-
-S3_ENDPOINT_URL="http://s3:9090"
-S3_BUCKET="creators"
-S3_ACCESS_KEY_ID="test"
-S3_SECRET_ACCESS_KEY="test"
-S3_REGION="us-east-1"
-```
-
-## Local services
-
-> **PostgreSQL and S3Mock are started automatically when the Dev Container starts.**
-
-Check that both services are running:
-
-```bash
-docker compose ps
-```
-
-They can also be started manually if necessary:
-
-```bash
-docker compose up -d
-```
-
-To verify that PostgreSQL is accepting connections:
-
-```bash
-docker compose exec db pg_isready -U creators -d creators
-```
-
-To verify the local S3 connection:
-
-```bash
-curl http://s3:9090
-```
-
-The response should contain the `creators` bucket.
-
-## Database migrations
-
-Apply available database migrations:
-
-```bash
+```sh
 python -m alembic upgrade head
-```
-
-To check the currently applied migration:
-
-```bash
-python -m alembic current
-```
-
-## Start the application
-
-Start the FastAPI development server:
-
-```bash
 python -m uvicorn app.main:app --reload --no-access-log
 ```
 
-The application is then available at:
+At the configured application origin, `/health` provides a health check, `/docs`
+provides OpenAPI documentation, `/auth/login` starts login, and `/auth/me` returns
+the authenticated local user ID. `POST /auth/logout` clears the local session.
 
-* `http://127.0.0.1:8000/health` — health check
-* `http://127.0.0.1:8000/docs` — OpenAPI documentation
-* `http://127.0.0.1:8000/auth/login` — start OIDC login
-* `http://127.0.0.1:8000/auth/me` — inspect the authenticated local user
+To stop local services while preserving database data:
 
-Local logout is a `POST` request:
-
-```javascript
-// Run in the browser console on the app origin to include its session cookie:
-await fetch("/auth/logout", {method: "POST"})
-```
-
-## Run tests
-
-Install the development dependencies and run the test suite:
-
-```bash
-python -m pip install -r requirements-dev.txt
-python -m pytest
-```
-
-The authentication tests simulate provider HTTP responses with test signing keys
-while exercising Authlib’s actual validation. They use an isolated database and
-do not contact Eurofurence services or use local credentials.
-
-## Stop local services
-
-When development is finished, stop the PostgreSQL and S3Mock containers:
-
-```bash
+```sh
 docker compose down
 ```
 
-The PostgreSQL data volume is preserved.
+## Checks
 
-To also remove the local PostgreSQL volume and all locally stored database data:
+Run the same checks as CI:
 
-```bash
-docker compose down -v
+```sh
+python -m ruff check .
+python -m ruff format --check .
+python -m pytest
 ```
 
-See `CONTRIBUTING.md` for contribution guidelines and `SECURITY.md` for reporting security issues.
+Tests use isolated databases and simulated identity-provider responses; they do
+not require Eurofurence services or credentials. Existing migration revisions
+are excluded from formatting checks.
 
-## Maintainer
+## Container build
 
-[@Neeklass](https://github.com/Neeklass)
+```sh
+docker build -t creators .
+```
 
-## License
+The image runs Uvicorn on port 8000. Supply environment-specific configuration
+and apply migrations separately before using authentication.
 
-See [LICENSE](LICENSE).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines,
+[SECURITY.md](SECURITY.md) for security reporting, and [LICENSE](LICENSE).

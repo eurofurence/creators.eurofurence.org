@@ -1,6 +1,9 @@
-.git
-.github
-.devcontainer
-__pycache__/
-.env
-docs/
+*
+!requirements.txt
+!app/
+!app/**
+!migrations/
+!migrations/**
+!alembic.ini
+**/__pycache__/
+**/*.py[cod]

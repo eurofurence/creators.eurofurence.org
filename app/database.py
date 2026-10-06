@@ -5,12 +5,10 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
 
-
 if settings.database_url is None:
     raise RuntimeError("DATABASE_URL is not configured")
 
 
-# Base for future models
 class Base(DeclarativeBase):
     pass
 
@@ -27,7 +25,7 @@ SessionLocal = sessionmaker(
 )
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Session]:
     db = SessionLocal()
 
     try:

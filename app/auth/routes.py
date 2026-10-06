@@ -45,7 +45,7 @@ async def login(request: Request) -> RedirectResponse:
     try:
         await require_provider_metadata()
         return await eurofurence.authorize_redirect(request, settings.oidc_redirect_uri)
-    except (OAuthError, JoseError, HTTPError, ValueError, KeyError, TypeError):
+    except OAuthError, JoseError, HTTPError, ValueError, KeyError, TypeError:
         raise authentication_error(
             request, 503, "Identity provider unavailable"
         ) from None
@@ -98,9 +98,9 @@ async def callback(
             or not subject
         ):
             raise OAuthError(error="invalid_identity")
-    except (OAuthError, JoseError):
+    except OAuthError, JoseError:
         raise authentication_error(request, 401, "OIDC authentication failed") from None
-    except (HTTPError, ValueError, KeyError, TypeError, AttributeError):
+    except HTTPError, ValueError, KeyError, TypeError, AttributeError:
         raise authentication_error(
             request, 503, "Identity provider unavailable"
         ) from None

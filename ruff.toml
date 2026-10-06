@@ -1,0 +1,2 @@
+target-version = "py314"
+extend-exclude = ["migrations/versions"]
