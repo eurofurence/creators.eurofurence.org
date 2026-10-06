@@ -1,0 +1,8 @@
+body { font: 1rem/1.5 system-ui, sans-serif; max-width: 70rem; margin: 2rem auto; padding: 0 1rem; color: #202030; }
+label { display: block; margin: .75rem 0; }
+input, select, textarea, button { font: inherit; padding: .4rem; }
+textarea { display: block; width: 95%; }
+fieldset, .channel { margin: 1rem 0; padding: 1rem; border: 1px solid #999; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; border-bottom: 1px solid #bbb; padding: .5rem; }
+[role="alert"] { border: 2px solid #a21c28; padding: 1rem; }

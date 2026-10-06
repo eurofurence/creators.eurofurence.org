@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}<h1>Your creator application — {{ event.name }}</h1>
+{% if record %}{% include "details.html" %}<h2>Next steps</h2>
+{% if record.status == 'NEW' %}<p>Your application awaits review.{% if editable %} You may edit it until the application window closes.{% endif %}</p>
+{% elif record.status == 'ON_REVIEW' %}<p>Your application is under review. Editing is locked; wait for the review outcome.</p>
+{% elif record.status == 'APPROVED' %}<p>Your application is approved. No further application review action is needed.</p>
+{% else %}<p>{{ 'Your application was reviewed and not approved.' if record.status == 'NOT_APPROVED' else 'Your application was not accepted for review.' }} See the reason above. A second application is not available; an administrator can reopen this application for correction or review.</p>{% endif %}
+{% else %}<p>You have not submitted an application for this event.</p>{% endif %}
+{% if editable %}<a href="/applications/form">{{ 'Edit application' if record else 'Apply for a Creator Badge' }}</a>{% elif not record or record.status == 'NEW' %}<p>Submission or editing is closed for this event.</p>{% endif %}
+{% endblock %}

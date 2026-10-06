@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.applications.pages import router as pages_router
+from app.applications.pages import static as application_static
 from app.applications.routes import router as applications_router
 from app.auth.routes import router as auth_router
 from app.config import settings
@@ -27,6 +29,8 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(applications_router)
+app.include_router(pages_router)
+app.mount("/application-assets", application_static, name="application-assets")
 
 
 @app.get("/health")

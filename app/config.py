@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     app_name: str = "Eurofurence Creator System"
     environment: str = "development"
     active_event_id: int | None = Field(default=None, gt=0)
+    badge_sequence_start: int = Field(default=1, gt=0)
 
     session_secret: SecretStr | None = None
     session_max_age: int = Field(default=14 * 24 * 60 * 60, gt=0)

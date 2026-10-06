@@ -24,6 +24,12 @@ async def check_eligibility(
     except RegistrationUnavailable, TimeoutError:
         return Eligibility.UNAVAILABLE
 
+    return classify_result(result, lookup)
+
+
+def classify_result(
+    result: RegistrationResult, lookup: RegistrationLookup
+) -> Eligibility:
     if not isinstance(result, RegistrationResult) or result.lookup != lookup:
         return Eligibility.UNAVAILABLE
     if result.status in (RegistrationStatus.PAID, RegistrationStatus.CHECKED_IN):

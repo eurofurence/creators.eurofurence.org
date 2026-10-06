@@ -16,6 +16,9 @@ class Event(Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     badge_print_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    badge_change_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     application_open_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     application_close_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     data_delete_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -1,0 +1,6 @@
+<p>Status: <strong>{{ record.status }}</strong></p>
+{% if badge %}<p>Reserved badge number: {{ badge.badge_number }}</p>{% endif %}
+{% if record.outcome_reason %}<h2>Decision reason</h2><p>{{ record.outcome_reason }}</p>{% endif %}
+<h2>Planned content</h2><ul>{% for kind in content_types %}{% if record[kind.lower()] %}<li>{{ kind }}</li>{% endif %}{% endfor %}</ul>
+<h2>Publication channels</h2><ul>{% for channel in channels %}<li>{{ channel.platform }}: <a href="{{ channel.canonical_url }}" rel="noopener noreferrer">{{ channel.original_representation }}</a>{{ ' (primary)' if channel.is_primary }}</li>{% endfor %}</ul>
+<h2>Convention videos</h2><ul>{% for video in videos %}<li><a href="{{ video.url }}" rel="noopener noreferrer">{{ video.url }}</a></li>{% else %}<li>No videos supplied (optional).</li>{% endfor %}</ul>

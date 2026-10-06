@@ -1,0 +1,2 @@
+{% extends "base.html" %}
+{% block content %}<h1>Applications — {{ event.name }}</h1><table><thead><tr><th>Reg-ID</th><th>Nickname</th><th>Email</th><th>Status</th><th>Review</th></tr></thead><tbody>{% for record in records %}<tr><td>{{ record.reg_id or 'Unavailable' }}</td><td>{{ record.nickname or 'Unavailable' }}</td><td>{{ record.email or 'Unavailable' }}</td><td>{{ record.status }}</td><td><a href="/admin/applications/{{ record.id }}">Review application</a></td></tr>{% else %}<tr><td colspan="5">No applications.</td></tr>{% endfor %}</tbody></table>{% endblock %}

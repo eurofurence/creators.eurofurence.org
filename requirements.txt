@@ -1,6 +1,9 @@
 # Web application
 fastapi==0.141.1          # Web framework
 uvicorn==0.52.4           # ASGI server
+Jinja2==3.1.6            # Server-rendered pages
+python-multipart==0.0.32 # Browser form parsing
+WTForms==3.2.2           # Established session-bound CSRF protection
 
 # Configuration
 pydantic-settings==2.15.0 # Application settings

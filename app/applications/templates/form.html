@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ 'Administrative correction' if administrative else 'Creator application' }}</h1>
+{% if error %}<p role="alert">{{ error }}</p>{% endif %}
+<form method="post">
+{{ csrf.csrf_token }}
+{% if submitted %}
+<input type="hidden" name="application_id" value="{{ submitted.get('application_id', '') }}"><input type="hidden" name="version" value="{{ submitted.get('version', '') }}">
+{% elif record %}<input type="hidden" name="application_id" value="{{ record.id }}"><input type="hidden" name="version" value="{{ record.version }}">{% endif %}
+<fieldset><legend>Planned content (choose at least one)</legend>
+{% for kind in content_types %}<label><input type="checkbox" name="content_type" value="{{ kind }}" {% if (submitted and kind in submitted.getlist('content_type')) or (not submitted and record and record[kind.lower()]) %}checked{% endif %}>{{ kind }}</label>{% endfor %}</fieldset>
+<fieldset><legend>Publication channels</legend><p>Enter handles or HTTPS account profile URLs. Mastodon needs a complete host/account URL; Bluesky needs the complete handle including its domain. Choose exactly one primary channel. Channels share one public creator name, which is completed after approval.</p>
+<div id="channels">
+{% set rows = submitted.getlist('account') if submitted else (channels if channels else [none]) %}
+{% for row in rows %}{% set selected_platform = submitted.getlist('platform')[loop.index0] if submitted else (row.platform if row else '') %}<div class="channel">
+<label>Platform <select name="platform">{% for platform in platforms %}<option value="{{ platform }}" {% if selected_platform == platform %}selected{% endif %}>{{ platform }}</option>{% endfor %}</select></label>
+<label>Handle / account URL <input name="account" maxlength="2048" value="{{ row if submitted else (row.original_representation if row else '') }}"></label>
+<label><input type="radio" name="primary" value="{{ loop.index0 }}" {% if (submitted and submitted.get('primary') == loop.index0|string) or (not submitted and ((row and row.is_primary) or (not row and loop.first))) %}checked{% endif %}>Primary</label>
+<button type="button" class="remove-channel">Remove</button>
+</div>{% endfor %}</div><button type="button" id="add-channel">Add channel</button></fieldset>
+<label>Convention videos (optional, up to 10 HTTPS URLs, one per line)
+<textarea name="videos" rows="6">{% if submitted %}{{ submitted.get('videos', '') }}{% else %}{% for video in videos %}{{ video.url }}{{ '\n' if not loop.last }}{% endfor %}{% endif %}</textarea></label>
+{% if administrative %}<label>Correction reason <textarea name="correction_reason" required maxlength="4000">{{ submitted.get('correction_reason', '') if submitted else '' }}</textarea></label>{% endif %}
+<button type="submit">{{ 'Save changes' if record or administrative else 'Submit application' }}</button>
+</form><script src="/application-assets/forms.js" defer></script>
+{% endblock %}

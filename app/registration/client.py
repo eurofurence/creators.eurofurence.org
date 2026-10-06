@@ -24,6 +24,8 @@ class RegistrationStatus(Enum):
 class RegistrationResult:
     lookup: RegistrationLookup
     status: RegistrationStatus
+    reg_id: str | None = None
+    nickname: str | None = None
 
 
 class RegistrationUnavailable(Exception):

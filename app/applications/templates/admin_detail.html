@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}<h1>Review application</h1>
+<dl><dt>Reg-ID</dt><dd>{{ record.reg_id or 'Unavailable' }}</dd><dt>Nickname</dt><dd>{{ record.nickname or 'Unavailable' }}</dd><dt>Email</dt><dd>{{ record.email or 'Unavailable' }}</dd></dl>
+{% include "details.html" %}
+<form method="post">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}">
+<label>Next status <select name="status">{% for status in transitions %}<option>{{ status }}</option>{% endfor %}</select></label>
+<label>Applicant-visible reason (required for rejection or approval reversal)<textarea name="reason" maxlength="4000"></textarea></label>
+<label>Private staff notes<textarea name="staff_notes" maxlength="10000">{{ record.staff_notes }}</textarea></label>
+<label><input type="checkbox" name="exceptional" value="yes">Exceptional correction after the badge change deadline (reason required)</label>
+<button type="submit">Apply review decision</button></form>
+<p><a href="/admin/applications/{{ record.id }}/correct">Correct application information</a></p><a href="/admin/applications">All applications</a>{% endblock %}

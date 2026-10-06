@@ -35,6 +35,12 @@ event. Missing event configuration or unavailable Registration verification retu
 HTTP 503 with `UNAVAILABLE` and `retryable: true`. The Registration adapter is
 currently unavailable until the EF contract and access are supplied.
 
+Configure the active event's application opening/closing times and its separate
+`badge_change_deadline_at` in the database using UTC timestamps. Existing events
+have no change deadline after migration; approval changes fail closed until it is
+configured. `BADGE_SEQUENCE_START` defaults to 1 and only affects creation of a
+new event counter.
+
 Set `DATABASE_URL` and the `S3_*` settings for your environment. Docker service
 hostnames work inside the development network; host-side development must use
 the published ports in `docker-compose.yml`.
@@ -59,6 +65,20 @@ At the configured application origin, `/health` provides a health check, `/docs`
 provides OpenAPI documentation, `/auth/login` starts login, and `/auth/me` returns
 the authenticated local user ID. `POST /auth/logout` clears the local session.
 
+`/applications` provides the creator dashboard and form. Administrators use
+`/admin/applications`. Submission and approval require available Registration
+verification. Trusted email is shown as unavailable until its integration is
+configured. Review notifications are queued; delivery is not yet implemented.
+
+An operator with database access explicitly grants or revokes ADMIN after the
+target user has logged in. Use the verified issuer and subject, not a local
+numeric user ID. No user is automatically promoted:
+
+```sh
+python -m app.identity.roles grant-admin --issuer "$OIDC_ISSUER_URL" --subject "TARGET_SUBJECT" --reason "Initial administrator"
+python -m app.identity.roles revoke-admin --issuer "$OIDC_ISSUER_URL" --subject "TARGET_SUBJECT" --reason "Access removed"
+```
+
 To stop local services while preserving database data:
 
 ```sh
@@ -78,6 +98,12 @@ python -m pytest
 Tests use isolated databases and simulated identity-provider responses; they do
 not require Eurofurence services or credentials. Existing migration revisions
 are excluded from formatting checks.
+
+Set `TEST_POSTGRES_URL` to a dedicated local PostgreSQL database to run the full
+integration suite. CI uses PostgreSQL 16 as a test target; this does not prescribe
+the production version. Tests create and remove a randomly named schema in that
+database and verify migrations, constraints, concurrent approvals and rollback.
+Without this variable, PostgreSQL tests are explicitly skipped.
 
 ## Container build
 
