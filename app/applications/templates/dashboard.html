@@ -2,9 +2,11 @@
 {% block content %}<h1>Your creator application — {{ event.name }}</h1>
 {% if record %}{% include "details.html" %}<h2>Next steps</h2>
 <p><a href="/creators/{{ record.id }}">Creator profile, helpers and participation</a></p>{% if record.withdrawn_at %}<p>Your creator participation is withdrawn. Only an administrator can restore it.</p>{% endif %}
+{% if record.status == 'APPROVED' and not has_picture %}<p><a href="/creators/{{ record.id }}#picture-upload">Upload your badge and profile picture</a>. Printing remains blocked until a valid picture is supplied.</p>{% endif %}
 {% if record.status == 'NEW' %}<p>Your application awaits review.{% if editable %} You may edit it until the application window closes.{% endif %}</p>
 {% elif record.status == 'ON_REVIEW' %}<p>Your application is under review. Editing is locked; wait for the review outcome.</p>
 {% elif record.status == 'APPROVED' %}<p>Your application is approved. No further application review action is needed.</p>
+{% if not profile or not profile.channel_name or not profile.channel_name.strip() %}<p role="alert">Your public creator name is still missing. <a href="/creators/{{ record.id }}">Complete your creator profile</a> before it can appear in the gallery or be printed on a badge. If editing is locked, contact an administrator.</p>{% endif %}
 {% else %}<p>{{ 'Your application was reviewed and not approved.' if record.status == 'NOT_APPROVED' else 'Your application was not accepted for review.' }} See the reason above. A second application is not available; an administrator can reopen this application for correction or review.</p>{% endif %}
 {% else %}<p>You have not submitted an application for this event.</p>{% endif %}
 {% if editable %}<a href="/applications/form">{{ 'Edit application' if record else 'Apply for a Creator Badge' }}</a>{% elif not record or record.status == 'NEW' %}<p>Submission or editing is closed for this event.</p>{% endif %}

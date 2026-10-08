@@ -1,0 +1,3 @@
+{% if has_picture %}
+<figure class="picture-preview"><img src="/creators/{{ record.id }}/picture" alt="Current application and creator profile picture" width="200" height="200"><figcaption>This picture is used for your application, badge and public profile when published.</figcaption></figure>
+{% else %}<p role="alert">No picture has been supplied. Upload your picture before review or printing; PNG, exactly 600×600 pixels, maximum {{ '%g'|format(upload_limit_mib) }} MiB.</p>{% endif %}

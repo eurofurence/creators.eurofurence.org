@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.applications.input import ApplicationInput
+from app.applications.input import ApplicationInput, ChannelInput
 from app.applications.models import (
     BusinessAudit,
     ConventionVideo,
@@ -139,34 +139,79 @@ def audit(db, actor_id, event_id, entity_id, action, changes, reason=""):
     )
 
 
-def replace_input(db: Session, record: CreatorApplication, data: ApplicationInput):
-    data.validate()
-    hidden = {
-        (channel.platform, channel.normalized_account): channel.publicly_hidden
+def current_input(db, record):
+    if record is None:
+        return None
+    return ApplicationInput(
+        tuple(
+            kind
+            for kind in ("LIVESTREAM", "SHORTS", "VLOGS")
+            if getattr(record, kind.lower())
+        ),
+        tuple(
+            ChannelInput(
+                c.platform,
+                c.original_representation,
+                c.normalized_account,
+                c.canonical_url,
+                c.is_primary,
+            )
+            for c in db.scalars(
+                select(CreatorChannel)
+                .where(CreatorChannel.application_id == record.id)
+                .order_by(CreatorChannel.id)
+            )
+        ),
+        tuple(
+            db.scalars(
+                select(ConventionVideo.url)
+                .where(ConventionVideo.application_id == record.id)
+                .order_by(ConventionVideo.position)
+            )
+        ),
+    )
+
+
+def replace_channels(db, application_id, channels):
+    existing = {
+        (channel.platform, channel.normalized_account): channel
         for channel in db.scalars(
-            select(CreatorChannel).where(CreatorChannel.application_id == record.id)
+            select(CreatorChannel).where(
+                CreatorChannel.application_id == application_id
+            )
         )
     }
+    retained = {(c.platform, c.normalized_account) for c in channels}
+    for key, channel in existing.items():
+        if key not in retained:
+            db.delete(channel)
+        else:
+            channel.is_primary = False
+    # Release the unique primary slot before assigning it to a different channel.
+    db.flush()
+    for value in channels:
+        channel = existing.get((value.platform, value.normalized_account))
+        if channel is None:
+            channel = CreatorChannel(
+                application_id=application_id,
+                platform=value.platform,
+                normalized_account=value.normalized_account,
+                publicly_hidden=False,
+            )
+            db.add(channel)
+        channel.original_representation = value.original_representation
+        channel.canonical_url = value.canonical_url
+        channel.is_primary = value.is_primary
+
+
+def replace_input(db: Session, record: CreatorApplication, data: ApplicationInput):
+    data.validate()
     for name in ("livestream", "shorts", "vlogs"):
         setattr(record, name, name.upper() in data.content_types)
-    db.execute(delete(CreatorChannel).where(CreatorChannel.application_id == record.id))
+    replace_channels(db, record.id, data.channels)
     db.execute(
         delete(ConventionVideo).where(ConventionVideo.application_id == record.id)
     )
-    for channel in data.channels:
-        db.add(
-            CreatorChannel(
-                application_id=record.id,
-                platform=channel.platform,
-                original_representation=channel.original_representation,
-                normalized_account=channel.normalized_account,
-                canonical_url=channel.canonical_url,
-                is_primary=channel.is_primary,
-                publicly_hidden=hidden.get(
-                    (channel.platform, channel.normalized_account), False
-                ),
-            )
-        )
     for i, url in enumerate(data.videos):
         db.add(ConventionVideo(application_id=record.id, position=i, url=url))
 
@@ -389,7 +434,6 @@ async def review(
         record.version += 1
         record.updated_at = now
         from app.badges.service import allocate
-        from app.creators.models import CreatorProfile
         from app.helpers.service import creator_activity_changed
 
         if target == "APPROVED":
@@ -398,8 +442,8 @@ async def review(
                     409, "Restore the withdrawn application before approving it."
                 )
             allocate(db, event.id, actor_id, application_id=record.id)
-            if db.get(CreatorProfile, record.id) is None:
-                db.add(CreatorProfile(application_id=record.id))
+            # The profile and image already passed the review gate above. Keep the
+            # submitted picture as the current badge/public image without copying it.
             creator_activity_changed(db, actor_id, record, True, reason)
         elif previous == "APPROVED":
             creator_activity_changed(db, actor_id, record, False, reason)

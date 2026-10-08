@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: creators
       POSTGRES_PASSWORD: creators
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     networks:
@@ -16,14 +16,20 @@ services:
     image: adobe/s3mock:5.2.0
     environment:
       COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: creators
-      COM_ADOBE_TESTING_S3MOCK_REGION: us-east-1
+      COM_ADOBE_TESTING_S3MOCK_STORE_REGION: us-east-1
+      COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /tmp/s3-data
+      COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT: "true"
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
+    volumes:
+      # /tmp inherits writable permissions for the image's non-root user.
+      - s3_data:/tmp
     networks:
       - dev
 
 volumes:
   postgres_data:
+  s3_data:
 
 networks:
   dev:

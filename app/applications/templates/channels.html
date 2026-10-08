@@ -1,0 +1,20 @@
+<fieldset><legend>Publication channels</legend>
+<input type="hidden" name="channels_present" value="yes">
+<p>Choose a platform, then enter your handle or account profile URL. Select one <strong>primary channel</strong> for your badge link. All channels share your public creator name.</p>
+<p class="hint">Examples: Twitch + @creator; YouTube + youtube.com/@creator. Mastodon needs https://host/@account; Bluesky needs the full handle including its domain. Put links to individual videos in the convention videos section of your application.</p>
+<div id="channels">
+{% set rows = values.getlist('account') or [''] %}
+{% for account in rows %}
+{% set selected_platform = values.getlist('platform')[loop.index0] if loop.index0 < values.getlist('platform')|length else '' %}
+<div class="channel">
+<strong class="channel-number">Channel {{ loop.index }}</strong>
+<label>Platform <select name="platform">{% for platform in platforms %}<option value="{{ platform }}" {% if selected_platform == platform %}selected{% endif %}>{{ platform_labels[platform] }}</option>{% endfor %}</select></label>
+<label>Handle or account URL <input name="account" maxlength="2048" required value="{{ account }}" placeholder="@handle or https://…"></label>
+<label class="primary-choice"><input type="radio" name="primary" value="{{ loop.index0 }}" required {% if values.get('primary') == loop.index0|string or (not values.getlist('account') and loop.first) %}checked{% endif %}>Primary channel — used for the badge link</label>
+<button type="button" class="remove-channel"{% if rows|length == 1 %} disabled{% endif %}>Remove channel</button>
+</div>
+{% endfor %}
+</div>
+<button type="button" id="add-channel">Add another channel</button>
+<p id="channel-feedback" class="hint" aria-live="polite">Changes take effect when you save. Keep at least one channel.</p>
+</fieldset>

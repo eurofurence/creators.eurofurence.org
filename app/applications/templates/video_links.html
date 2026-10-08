@@ -1,0 +1,19 @@
+{% macro video_row(value='', index=0, errors=video_errors) %}
+<div class="video-link">
+<label for="video-{{ index }}"><span class="video-number">Convention video link {{ index + 1 }}</span></label>
+<input id="video-{{ index }}" type="url" name="video_url" value="{{ value }}" maxlength="2048" placeholder="https://…" aria-describedby="videos-help{% if index in errors %} video-error-{{ index }}{% endif %}"{% if index in errors %} aria-invalid="true"{% endif %}>
+<button type="button" class="remove-video" aria-label="Remove convention video link {{ index + 1 }}">Remove</button>
+{% if index in errors %}<p id="video-error-{{ index }}" class="field-error">{{ errors[index] }}</p>{% endif %}
+</div>
+{% endmacro %}
+<fieldset><legend>Existing convention videos (optional)</legend>
+<input type="hidden" name="videos_present" value="yes">
+<p id="videos-help" class="hint">Links to videos you have already made at conventions. Add up to 10 HTTPS links. These are separate from your publication channels. Remove a link only if you no longer want to include it; you can save with no links.</p>
+<div id="video-links">
+{% for value in values.getlist('video_url') or [''] %}{{ video_row(value, loop.index0) }}{% endfor %}
+</div>
+<template id="video-row-template">{{ video_row(errors={}) }}</template>
+<button type="button" id="add-video">Add another link</button>
+<p id="video-feedback" class="hint" aria-live="polite"></p>
+<noscript><p>Enable JavaScript to add or remove rows. You can edit existing links or clear their fields to remove them.</p></noscript>
+</fieldset>

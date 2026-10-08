@@ -56,7 +56,7 @@ async def login(request: Request) -> RedirectResponse:
 @router.get("/callback", name="auth_callback")
 async def callback(
     request: Request, db: Annotated[Session, Depends(get_db)]
-) -> dict[str, str | int]:
+) -> RedirectResponse:
     try:
         require_configuration()
     except ValueError:
@@ -117,7 +117,7 @@ async def callback(
         ) from None
     request.session["user_id"] = user.id
     request.session["identity_key"] = user.session_key
-    return {"status": "authenticated", "user_id": user.id}
+    return RedirectResponse("/", status_code=303)
 
 
 @router.get("/me")
@@ -126,7 +126,7 @@ def me(user: Annotated[LocalUser, Depends(get_current_user)]) -> dict[str, int]:
 
 
 @router.post("/logout")
-async def logout(request: Request) -> dict[str, str]:
+async def logout(request: Request) -> RedirectResponse:
     await protected_form(request)
     request.session.clear()
-    return {"status": "logged_out"}
+    return RedirectResponse("/", status_code=303)

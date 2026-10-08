@@ -144,6 +144,7 @@ def finish(client, provider):
     return client.get(
         "/auth/callback",
         params={"code": "test-code", "state": provider.query["state"][0]},
+        follow_redirects=False,
     )
 
 
@@ -153,6 +154,32 @@ def session_data(client):
     )
 
 
+def test_callback_redirect_clears_visible_parameters_and_ignores_return_targets(
+    client, provider, caplog
+):
+    begin(client, provider)
+    response = client.get(
+        "/auth/callback",
+        params={
+            "code": "test-code",
+            "state": provider.query["state"][0],
+            "next": "https://attacker.example",
+            "return_to": "//attacker.example",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303 and response.headers["location"] == "/"
+    assert response.content == b""
+    assert (
+        "test-code" not in caplog.text and provider.query["state"][0] not in caplog.text
+    )
+    page = client.get(response.headers["location"])
+    assert str(page.url) == "http://127.0.0.1:8000/"
+    assert "Logout" in page.text and "Your application" in page.text
+    assert "private-access-token" not in str(session_data(client))
+    assert 'href="/admin/applications"' not in page.text
+
+
 def test_login_uses_code_flow_with_pkce(client, provider):
     query = begin(client, provider)
     assert query["response_type"] == ["code"]
@@ -160,7 +187,7 @@ def test_login_uses_code_flow_with_pkce(client, provider):
     assert query["redirect_uri"] == ["http://127.0.0.1:8000/auth/callback"]
     assert query["code_challenge_method"] == ["S256"]
     assert query["nonce"][0] and query["state"][0]
-    assert finish(client, provider).status_code == 200
+    assert finish(client, provider).status_code == 303
     assert provider.token_requests
 
 
@@ -170,8 +197,10 @@ def test_callback_stores_only_local_user_and_logout_clears_session(
     assert client.get("/auth/me").status_code == 401
     begin(client, provider)
     response = finish(client, provider)
-    assert response.status_code == 200
-    user_id = response.json()["user_id"]
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    assert response.content == b""
+    user_id = session_data(client)["user_id"]
     assert session_data(client) == {
         "user_id": user_id,
         "identity_key": db.get(LocalUser, user_id).session_key,
@@ -190,9 +219,7 @@ def test_callback_stores_only_local_user_and_logout_clears_session(
 
     assert client.post("/auth/logout").status_code == 403
     assert (
-        client.post(
-            "/auth/logout", data={"csrf_token": csrf(client, "/account")}
-        ).status_code
+        client.post("/auth/logout", data={"csrf_token": csrf(client, "/")}).status_code
         == 200
     )
     assert client.get("/auth/me").status_code == 401
@@ -200,16 +227,19 @@ def test_callback_stores_only_local_user_and_logout_clears_session(
 
 def test_repeat_login_ignores_mutable_profile_and_roles(client, provider, db):
     begin(client, provider)
-    user_id = finish(client, provider).json()["user_id"]
+    assert finish(client, provider).status_code == 303
+    user_id = session_data(client)["user_id"]
     provider.claims.update(
         email="changed@example.test", name="Changed", roles=["BADGE_STAFF"]
     )
     begin(client, provider)
-    assert finish(client, provider).json()["user_id"] == user_id
+    assert finish(client, provider).status_code == 303
+    assert session_data(client)["user_id"] == user_id
     assert db.scalar(select(func.count()).select_from(LocalUser)) == 1
     provider.claims["sub"] = "another-person"
     begin(client, provider)
-    assert finish(client, provider).json()["user_id"] != user_id
+    assert finish(client, provider).status_code == 303
+    assert session_data(client)["user_id"] != user_id
 
 
 @pytest.mark.parametrize(
@@ -289,7 +319,7 @@ def test_missing_code_rejected(client, provider):
 
 def test_callback_replay_rejected(client, provider):
     begin(client, provider)
-    assert finish(client, provider).status_code == 200
+    assert finish(client, provider).status_code == 303
     assert finish(client, provider).status_code == 401
     assert len(provider.token_requests) == 1
 
@@ -393,7 +423,8 @@ def test_same_subject_different_issuers_are_distinct(db):
 
 def test_deleted_local_user_is_not_authenticated(client, provider, db):
     begin(client, provider)
-    user_id = finish(client, provider).json()["user_id"]
+    assert finish(client, provider).status_code == 303
+    user_id = session_data(client)["user_id"]
     db.delete(db.scalar(select(ExternalIdentity)))
     db.delete(db.get(LocalUser, user_id))
     db.commit()
@@ -446,7 +477,7 @@ def test_discovery_issuer_checked_again_on_callback(client, provider):
 
 def test_tampered_cookie_is_not_authenticated(client, provider):
     begin(client, provider)
-    assert finish(client, provider).status_code == 200
+    assert finish(client, provider).status_code == 303
     cookie = client.cookies.get("creator_session")
     payload, timestamp, signature = cookie.split(".")
     payload = base64.b64encode(b'{"user_id":999}').decode()

@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% block content %}
 <h1>Creator profile and helpers</h1>
+{% if error %}<p role="alert">{{ error }} Your entered text is kept below. Select the file again if retrying a picture upload.</p>{% endif %}
 {% if administrative and profile %}
 <h2>Public visibility</h2>
 <form method="post" action="/admin/creators/{{ record.id }}/visibility">{{ csrf.csrf_token }}<input type="hidden" name="hidden" value="{{ 'no' if profile.publicly_hidden else 'yes' }}"><button>{{ 'Restore public profile' if profile.publicly_hidden else 'Hide public profile' }}</button></form>
@@ -8,15 +9,23 @@
 <p>Application: {{ record.status }}. Participation: {{ 'Withdrawn' if record.withdrawn_at else ('Active' if active else 'Inactive') }}.</p>
 <p>Change deadline: {{ event.badge_change_deadline_at or 'Not configured' }} (UTC).</p>
 {% if not editable %}<p>Normal profile and helper changes are currently locked.</p>{% endif %}
-{% if profile and profile.image_id %}<img src="/creators/{{ record.id }}/picture" alt="Your current profile picture" width="200" height="200">{% endif %}
+{% if not active or not (editable or administrative) %}
+<h2>Public creator name</h2><p>{{ profile.channel_name if profile and profile.channel_name else 'Not yet supplied' }}</p>
+<h2>Publication channels</h2><ul>{% for channel in channels %}<li>{{ platform_labels[channel.platform] }}: <a href="{{ channel.canonical_url }}" rel="noopener noreferrer">{{ channel.original_representation }}</a>{{ ' (primary — badge link)' if channel.is_primary }}</li>{% endfor %}</ul>
+{% endif %}
+<h2>Current application and profile picture</h2>
+{% include "picture_preview.html" %}
+{% if record.status != 'APPROVED' %}<p><a href="/applications">Return to your application</a> to check review status and available editing options.</p>{% endif %}
 {% for ban in banned %}<p role="alert">Banned-account warning: {{ ban.platform }} / {{ ban.normalized_account }} — {{ ban.private_reason }}. Approval is not automatically changed.</p>{% endfor %}
 {% if active and (editable or administrative) %}
-<form method="post" action="/creators/{{ record.id }}/profile">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}">
-<label>Public creator/channel name <input name="channel_name" required maxlength="200" value="{{ profile.channel_name if profile else '' }}"></label>
-<fieldset><legend>Publication channels</legend><p>All channels share the single display name above. Choose exactly one primary for the badge link.</p>
-<div id="channels">{% for channel in channels %}<div class="channel"><label>Platform <select name="platform">{% for platform in platforms %}<option {% if channel.platform == platform %}selected{% endif %}>{{ platform }}</option>{% endfor %}</select></label><label>Handle / account URL <input name="account" maxlength="2048" value="{{ channel.original_representation }}"></label><label><input type="radio" name="primary" value="{{ loop.index0 }}" {% if channel.is_primary %}checked{% endif %}>Primary</label><button type="button" class="remove-channel">Remove</button></div>{% endfor %}</div><button type="button" id="add-channel">Add channel</button></fieldset>
+<form method="post" action="/creators/{{ record.id }}/profile">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ values.get('version', record.version) }}">
+<label>Public creator/channel name <input name="channel_name" required maxlength="200" value="{{ values.get('channel_name', '') }}"></label>
+{% include "channels.html" %}
+<p>Saving your profile keeps your picture, planned content and convention video links.</p>
 {% include "admin_policy.html" %}<button>Save profile</button></form>
-<form method="post" enctype="multipart/form-data" action="/creators/{{ record.id }}/picture">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}"><label>Profile picture (PNG, exactly 600×600) <input type="file" name="picture" accept="image/png" required></label>{% include "admin_policy.html" %}<button>Replace picture</button></form>
+<h2 id="picture-upload">{{ 'Replace' if has_picture else 'Upload' }} picture</h2>
+<p>Save any profile text changes above first. This separate action updates the application, badge and public profile picture together.</p>
+<form method="post" enctype="multipart/form-data" action="/creators/{{ record.id }}/picture">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}">{% include "picture_input.html" %}{% include "admin_policy.html" %}<button>{{ 'Replace picture' if has_picture else 'Upload picture' }}</button></form>
 {% endif %}
 <h2>Invitations</h2><p>Links are single-use and shown once. Resend to replace a lost unused link.</p>
 {% if editable %}<form method="post" action="/creators/{{ record.id }}/invitations">{{ csrf.csrf_token }}{% include "admin_policy.html" %}<button>Create invitation</button></form>{% endif %}

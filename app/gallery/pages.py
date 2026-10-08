@@ -5,8 +5,9 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
 
-from app.applications.pages import DB, User, integer, templates
+from app.applications.pages import DB, User, integer, render
 from app.applications.security import protected_form, require_admin
+from app.auth.dependencies import get_optional_user
 from app.creators.images import ImageStorageUnavailable, normalize_png
 from app.creators.pages import Store
 from app.events.models import Event
@@ -17,7 +18,6 @@ router = APIRouter()
 
 def cache_headers(request, content):
     # Revalidate at the origin so hiding/deletion wins over browser/CDN stale data.
-    # Server-side consumers can use the documented five-minute polling interval.
     return {
         "ETag": '"' + hashlib.sha256(content).hexdigest() + '"',
         "Cache-Control": "private, no-cache, must-revalidate"
@@ -87,18 +87,19 @@ def home(request: Request, db: DB):
             .order_by(Event.year.desc())
         )
     )
-    content = templates.get_template("gallery_index.html").render(years=years).encode()
-    return conditional(request, content, "text/html")
+    get_optional_user(request, db)
+    return render(request, "gallery_index.html", years=years)
 
 
 @router.get("/gallery/{year}")
 def gallery(year: int, request: Request, db: DB):
-    content = (
-        templates.get_template("gallery.html")
-        .render(year=year, creators=[row for row, _ in public_records(db, year)])
-        .encode()
+    get_optional_user(request, db)
+    return render(
+        request,
+        "gallery.html",
+        year=year,
+        creators=[row for row, _ in public_records(db, year)],
     )
-    return conditional(request, content, "text/html")
 
 
 @router.post("/admin/creators/{application_id}/visibility")

@@ -1,204 +1,237 @@
 # Eurofurence Creator System
 
-Web application for managing Eurofurence Video Creator applications.
+A server-rendered application for Eurofurence Video Creator applications,
+review, creator profiles, helpers, badges and pickup. It also provides a public
+creator gallery/API and administrative exports.
 
-## Development setup
+**Development milestone, not a production release.** Real EF OIDC is supported;
+live Registration, trusted identity profile data and notification delivery still
+need EF contracts and adapters. Local acceptance testing uses explicit manual
+Registration records.
 
-Use Docker Desktop, Visual Studio Code, and the Dev Containers extension.
-Open the repository and select **Dev Containers: Reopen in Container**.
-The container installs `requirements-dev.txt` with pip and starts the local
-PostgreSQL and S3-compatible services.
+## Prerequisites and installation
 
-For development outside the container, create and activate a Python 3.14 virtual
-environment, then install the development dependencies:
+- Python 3.14, Git, Docker with Compose (Docker Desktop on Windows).
+- An EF development OIDC client and an approved callback URI. Obtain credentials
+  through the maintainer/EF Identity team, never from repository history.
+- Helm is optional for local development and required for chart verification.
+- No Node.js or frontend build step. Runtime dependencies and their purposes are
+  pinned in `requirements.txt`; test/lint tools are in `requirements-dev.txt`.
+
+From a clone of this repository, create a virtual environment:
 
 ```sh
+python3.14 -m venv .venv
+. .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 ```
 
-Runtime dependencies are in `requirements.txt`.
+On Windows PowerShell:
 
-For Windows host development, run `powershell -ExecutionPolicy Bypass -File scripts/dev-setup.ps1`.
-It preserves valid local credentials/session settings in ignored `.env`, prompts
-securely for missing development OIDC credentials, starts local storage, migrates,
-and checks configuration. Later sessions reuse `.env`; environment variables still
-override it. Use `python -m app.dev.check` for value-free readiness diagnostics.
+```powershell
+py -3.14 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+powershell -ExecutionPolicy Bypass -File scripts/dev-setup.ps1
+```
+
+The Windows setup securely prompts for missing OIDC credentials, preserves valid
+existing `.env` values, starts local services without recreating existing
+containers, applies migrations, selects/creates a local Event and runs safe
+diagnostics. It does not fabricate Registration eligibility or grant roles.
+
+Alternatively, use VS Code's **Dev Containers: Reopen in Container**. The Dev
+Container installs dependencies and starts the supporting services; complete the
+configuration and migrations below. Use `db` and `s3` as service hostnames inside
+that container, and loopback addresses for host-side development.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and configure it for your environment. Never commit
-the `.env` file or credentials. Set `SESSION_SECRET` to a unique random value of
-at least 32 characters.
+For manual setup, copy `.env.example` to `.env` **only if `.env` does not already
+exist**. Configure it privately; environment variables override this file.
 
-Login requires `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_ISSUER_URL`,
-`OIDC_SERVER_METADATA_URL`, and `OIDC_REDIRECT_URI`. The redirect URI must exactly
-match the registered callback. Open the application on the same origin.
-The current login requests only `openid`.
+| Setting | Local configuration |
+| --- | --- |
+| `ENVIRONMENT` | `development` |
+| `SESSION_SECRET` | A unique random secret of at least 32 characters |
+| `DATABASE_URL` | Compose's development database; use host `127.0.0.1:5432` on the host or `db:5432` in the Dev Container |
+| `S3_ENDPOINT_URL` | `http://127.0.0.1:9090` on the host or `http://s3:9090` in the Dev Container |
+| `S3_BUCKET`, `S3_REGION` | `creators`, `us-east-1` for the local mock |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Local mock values from `.env.example`; never reuse them in production |
+| `OIDC_*` | Approved client ID/secret, issuer, discovery URL and exact registered redirect URI |
+| `OIDC_REDIRECT_URI` | Normally `http://127.0.0.1:8000/auth/callback` for this host setup |
+| `ACTIVE_EVENT_ID` | Existing local Event ID; no calendar-year fallback |
+| `REGISTRATION_PROVIDER` | `manual_test` for explicit local fixtures; otherwise `unavailable` until a real adapter exists |
+| `REGISTRATION_MANUAL_FILE` | Private ignored JSON path, for example `temp/manual-registration.json` |
+| `NOTIFICATION_PROVIDER_FACTORY` | Leave unset locally; no real transport is bundled |
 
-Set `ACTIVE_EVENT_ID` to the local database ID of the application event.
-Authenticated `GET /applications/eligibility` checks the current user for that
-event. Missing event configuration or unavailable Registration verification returns
-HTTP 503 with `UNAVAILABLE` and `retryable: true`. The Registration adapter is
-currently unavailable until the EF contract and access are supplied.
+The current OIDC client requests only `openid`. Open the same origin as the
+registered callback; mixing `localhost` and `127.0.0.1` breaks session/state
+continuity. Do not change a valid existing client configuration to match an
+example. Browser credentials, `.env` and manual identity fixtures must remain
+untracked. `python -m app.dev.check` reports configuration status without values;
+it does not prove that every external service is reachable.
 
-Configure the active event's application opening/closing times and its separate
-`badge_change_deadline_at` in the database using UTC timestamps. Existing events
-have no change deadline after migration; approval changes fail closed until it is
-configured. `BADGE_SEQUENCE_START` defaults to 1 and only affects creation of a
-new event counter.
+### Services, migrations and Event
 
-Interpret local event deadlines in `Europe/Berlin` (including summer-time offset)
-and convert them to UTC before storing them. `badge_print_at` is the physical
-print timestamp; it does not control editing. Set the event's `helper_limit` to
-NULL for unlimited helpers or a nonnegative integer for a per-creator limit.
-
-Set `DATABASE_URL` and the `S3_*` settings for your environment. Docker service
-hostnames work inside the development network; host-side development must use
-the published ports in `docker-compose.yml`.
-
-The Dev Container creates the shared network automatically. To start services
-manually, create `creators-dev` if it does not exist, then run:
+If the Docker network does not exist, create it once:
 
 ```sh
-docker compose up -d db s3
+docker network create creators-dev
 ```
 
-## Run
-
-Apply migrations before logging in, then start the development server:
+Then start services without replacing existing containers:
 
 ```sh
+docker compose up -d --no-recreate db s3
+docker compose exec -T db pg_isready -U creators -d creators
 python -m alembic upgrade head
-python -m uvicorn app.main:app --reload --no-access-log
+python -m app.dev.event --interactive
+python -m app.dev.check
 ```
 
-At the configured application origin, `/health` provides a health check, `/docs`
-provides OpenAPI documentation, `/auth/login` starts login, and `/auth/me` returns
-the authenticated local user ID. `/ready` verifies DB connectivity; optional
-external services do not affect readiness. Use the CSRF-protected logout form
-at `/account` to clear the local session.
+`app.dev.event` preserves an existing selected Event. New local Events use dates
+relative to creation; the command records `ACTIVE_EVENT_ID` in `.env`. Use
+`--select-id EVENT_ID` to select an existing Event without changing its data.
+Do not run `--refresh` on a real or independently configured Event.
 
-`/applications` provides the creator dashboard and form. Administrators use
-`/admin/applications`. Submission and approval require available Registration
-verification. Trusted email is shown as unavailable until its integration is
-configured. Review notifications are queued for the separate notification worker.
+New Compose containers bind to loopback and persist PostgreSQL and S3 in named
+volumes. **Older S3 containers may have no persistent volume.** `--no-recreate`
+keeps them intact but does not apply changed ports, images or mounts. Before
+applying Compose changes, inspect `docker compose ps` and the S3 container's
+mounts; back up/transfer its objects or complete an approved domain reset first.
+Never recreate an old unmounted S3 container while retaining its DB references.
 
-Approved creators manage profiles, pictures and invitations from the dashboard.
-Helpers use `/helpers`. Invitation links require the helper's own login; their
-secret stays in the URL fragment until the registration form is submitted.
-Configure private S3 for pictures. `PROFILE_IMAGE_MAX_BYTES` defaults to 10485760
-(10 MiB); `INVITATION_ATTEMPTS_PER_MINUTE` defaults to 10 per signed-in user.
+### Manual Registration
 
-Run image cleanup periodically in a separate process using the same DB/S3
-configuration. It retries failed deletions, removes replaced/abandoned uploads,
-and deletes images when their event reaches `data_delete_at`. A nonzero exit
-status means deletions remain pending and the command should be retried:
+Complete real OIDC login first. `/auth/me` shows the local user ID. In a private
+terminal, `python -m app.dev.identity --user-id USER_ID` retrieves that user's
+verified issuer/subject for the local fixture. Its output is personal data; do
+not attach it to an issue or commit it.
 
-```sh
-python -m app.creators.images
+Create the ignored JSON file with one entry per identity and Event. Replace the
+placeholders with that verified identity and the actual Event ID/year:
+
+```json
+[
+  {
+    "issuer": "https://your-approved-issuer.example/",
+    "subject": "verified-subject",
+    "event_id": 1,
+    "event_year": 2027,
+    "status": "PAID",
+    "reg_id": "LOCAL-TEST-1",
+    "nickname": "Local test creator"
+  }
+]
 ```
 
-For full retention cleanup, schedule `python -m app.events.cleanup`. It removes
-due event assets and workflow data, unused local identities/roles, and finally
-the Event. Failures retain references for retry and return a nonzero exit code;
-ADMIN can inspect `/admin/retention`. Configure `data_delete_at` explicitly or
-use its default of 30 days after `ends_at`. Banned accounts remain independent.
-Recreated identities require explicit role grants again.
+`PAID` and `CHECKED_IN` are eligible; `INELIGIBLE`, `UNKNOWN` and `UNAVAILABLE`
+exercise negative/error paths. Missing or duplicate bindings fail closed.
+Fixtures reload on every check. The provider is rejected outside development/test.
+Use separate real dev accounts and fixtures for Helper and role-isolation tests.
 
-`python -m app.events.manage event.json --reason "Event configuration"` creates
-or updates an event from JSON fields matching the Event configuration. Include
-id, year, name, starts_at, ends_at, application_open_at, application_close_at,
-badge_change_deadline_at and badge_print_at. Dates require explicit UTC offsets;
-helper_limit and data_delete_at are optional. Set ACTIVE_EVENT_ID separately.
-
-Public galleries are at `/gallery/{year}` and the read-only public API at
-`/api/v1/events/{year}/creators`. The API and public images support conditional
-GET using ETag. Responses require revalidation so hidden/expired profiles are
-not deliberately served stale by browser caches. ADMIN public visibility
-controls are on each creator's administration page.
-
-Staff use `/staff` to select an authorized event for Reg-ID lookup and per-badge
-pickup. ADMIN can undo accidental pickup, manage banned channels, inspect failed
-notifications, download profile PNGs and generate operational XLSX exports.
-Print-ready exports require fresh Registration checks and complete profile assets.
-Operations-only workbooks remain available for diagnosis and are explicitly not
-print-ready. Both include private operational data and must be handled accordingly.
-
-Run notification delivery in a separate process with the same database settings:
+ADMIN and event-scoped BADGE_STAFF are explicitly granted by an operator after
+login, using verified identity values and a reason:
 
 ```sh
-python -m app.notifications.worker
+python -m app.identity.roles grant-admin --issuer ISSUER --subject SUBJECT --reason "Initial administrator"
+python -m app.identity.roles grant-badge-staff --issuer ISSUER --subject SUBJECT --event-id EVENT_ID --reason "Local pickup testing"
 ```
 
-Set `NOTIFICATION_PROVIDER_FACTORY` to a trusted installed `module:factory`
-implementing `app.notifications.client.NotificationProvider` after EF approves
-notification access, registered Operational type keys and recipient mapping.
-No live EF transport is bundled while that contract is unconfirmed. Unset
-configuration explicitly reports provider unavailable; there is no SMTP fallback.
-The worker processes at most 100 due items, retries up to five attempts with
-backoff/Retry-After, and exposes failures at `/admin/notifications`. It exits nonzero
-for unavailable configuration or terminal failed items. Schedule repeated runs to
-process retries. Provider calls must be asynchronous and bounded; the worker uses
-a 60-second timeout and a five-minute recovery lease. An interrupted delivery after
-provider acceptance can be retried, so the approved adapter should use the stable
-delivery identifier for provider deduplication if the real contract supports it.
+Corresponding commands are `revoke-admin` and `revoke-badge-staff`. OIDC login
+never automatically grants a role.
 
-An operator with database access explicitly grants or revokes ADMIN after the
-target user has logged in. Use the verified issuer and subject, not a local
-numeric user ID. No user is automatically promoted:
+## Start, use and stop
 
 ```sh
-python -m app.identity.roles grant-admin --issuer "$OIDC_ISSUER_URL" --subject "TARGET_SUBJECT" --reason "Initial administrator"
-python -m app.identity.roles revoke-admin --issuer "$OIDC_ISSUER_URL" --subject "TARGET_SUBJECT" --reason "Access removed"
-python -m app.identity.roles grant-badge-staff --issuer "$OIDC_ISSUER_URL" --subject "TARGET_SUBJECT" --event-id 1 --reason "Pickup shift"
-python -m app.identity.roles revoke-badge-staff --issuer "$OIDC_ISSUER_URL" --subject "TARGET_SUBJECT" --event-id 1 --reason "Shift ended"
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
-To stop local services while preserving database data:
+Open **http://127.0.0.1:8000/**. Login and CSRF-protected POST logout return to `/`.
+`/health` checks the process; `/ready` checks DB connectivity only. `/docs` is the
+OpenAPI reference.
+
+- `/applications`: submission, current picture and workflow status.
+- `/admin/applications`: ADMIN review. Review errors preserve entered notes.
+- Creator profile links: public name, channels, pictures, invitations and participation.
+- `/helpers`: the signed-in user's helper relationships.
+- `/staff`: authorized Event selection, stored Reg-ID lookup and pickup.
+- `/gallery/YEAR` and `/api/v1/events/YEAR/creators`: publicly visible creators.
+
+The submitted PNG must be exactly 600×600 pixels and at most
+`PROFILE_IMAGE_MAX_BYTES` (default 10 MiB). It is decoded/re-encoded and remains
+the current picture through approval. Uploading a replacement is a separate
+action. Complete the public creator name after approval before publication or
+printing. Print checks still require real assets and current eligibility.
+
+Stop Uvicorn with **Ctrl+C**. For normal pauses use:
 
 ```sh
-docker compose down
+docker compose stop
 ```
 
-## Checks
+Do not use `down -v` to stop development. Legacy unmounted S3 containers require
+the storage transition procedure before shutdown/recreation; do not assume their
+contents survive. Keep a private DB-and-object backup for data you need to retain.
 
-Run the same checks as CI:
+## Tests and checks
 
 ```sh
+python -m pytest -ra
 python -m ruff check .
 python -m ruff format --check .
-python -m pytest
+python -m alembic check
+git diff --check
 ```
 
-Tests use isolated databases and simulated identity-provider responses; they do
-not require Eurofurence services or credentials. Existing migration revisions
-are excluded from formatting checks.
+Tests use isolated data and simulated identity-provider responses, not EF
+credentials. `alembic check` uses the configured database and is read-only;
+upgrade that database normally if its migration head is behind.
 
-Set `TEST_POSTGRES_URL` to a dedicated local PostgreSQL database to run the full
-integration suite. CI uses PostgreSQL 16 as a test target; this does not prescribe
-the production version. Tests create and remove a randomly named schema in that
-database and verify migrations, constraints, concurrent approvals and rollback.
-Without this variable, PostgreSQL tests are explicitly skipped.
-
-## Container build
+For PostgreSQL coverage, use a **dedicated disposable test database**, never the
+acceptance database. One local setup, with deliberately disposable credentials:
 
 ```sh
-docker build -t creators .
+docker run --name creators-test-db -d -p 127.0.0.1:55439:5432 -e POSTGRES_USER=creator_test -e POSTGRES_PASSWORD=local_test_only -e POSTGRES_DB=creator_test postgres:16
+docker exec creators-test-db pg_isready -U creator_test -d creator_test
 ```
 
-The image runs Uvicorn on port 8000. Supply environment-specific configuration
-and apply migrations separately before using authentication.
+If an appropriate container already uses that port, reuse it. Set the test URL:
 
-The Helm chart is `charts/creators`. Set image.repository and image.tag, plus
-environment-specific env/extraEnv/envFrom references. Referenced configuration
-and secrets must exist before the pre-install/pre-upgrade migration Job. The
-chart does not provision PostgreSQL, S3 or Identity. Ingress and worker CronJobs
-are opt-in. Render and lint with your deployment values before rollout.
-Migrations never run in application replicas or automatically downgrade during
-rollback. Migration 18df24a910ce requires a coordinated application cutover:
-drain old writers before migration; existing sessions must log in again.
-Keep Uvicorn access logging disabled and configure upstream log redaction for
-callback query parameters. Enable HTTPS ingress for secure production cookies.
+```sh
+export TEST_POSTGRES_URL='postgresql+psycopg://creator_test:local_test_only@127.0.0.1:55439/creator_test'
+```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines,
-[SECURITY.md](SECURITY.md) for security reporting, and [LICENSE](LICENSE).
+PowerShell uses `$env:TEST_POSTGRES_URL = 'postgresql+psycopg://creator_test:local_test_only@127.0.0.1:55439/creator_test'`.
+Then run `python -m pytest -ra`. Fixtures create/drop random schemas and test
+migrations, constraints and concurrency. Without this variable, PostgreSQL
+cases are skipped; inspect the summary. SQLite variants of PostgreSQL-only
+locking tests skip even in a full run.
+
+Set `HELM_BINARY` to the installed Helm executable for the chart-rendering test.
+CI uses Helm 4.3.0 and PostgreSQL 16; these are test targets, not an assumed EF
+production database version. Windows-only tooling tests skip on other platforms.
+Existing migration revisions are excluded from Ruff formatting checks.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Login unavailable or callback fails | Safe diagnostics, exact callback origin, approved credentials and issuer; never enable callback query logging |
+| Eligibility unavailable | Active Event, fixture path, issuer/subject and Event ID/year; production has no manual fallback |
+| Approved creator absent from gallery or print blocked | Public name, current valid image, primary channel, visibility, participation and retention; do not bypass print validation |
+| Stored picture unavailable | S3 running, correct bucket/endpoint and retained object; an empty replacement container does not repair DB references |
+| Reg-ID lookup empty | Search the stored attendee Reg-ID, not the separate badge number; check Event scope |
+| Changes locked | Application state/window and badge-change deadline; print time is a separate setting |
+| Notification pending | No transport is configured by default; the outbox is not proof of delivery |
+| Dates expired after a pause | Inspect the Event before changing it; choose an explicit refresh, Event configuration or approved local reset |
+
+## Deployment and maintenance
+
+`docker build -t creators .` builds the non-root runtime image. The Helm chart
+is [charts/creators](charts/creators); it does not provision PostgreSQL, S3 or
+Identity.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md),
+[SUPPORT.md](SUPPORT.md) and [LICENSE](LICENSE).

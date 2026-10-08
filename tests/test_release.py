@@ -578,7 +578,8 @@ def test_representative_local_end_to_end(browser, provider):
     provider.claims["sub"] = "person-1"
     client.cookies.clear()
     auth_tests.begin(client, provider)
-    assert auth_tests.finish(client, provider).status_code == 200
+    callback = auth_tests.finish(client, provider)
+    assert callback.status_code == 303 and callback.headers["location"] == "/"
     assert m2.submit_form(client).status_code == 303
     with Session(engine) as db:
         application_id = db.scalar(select(CreatorApplication.id))

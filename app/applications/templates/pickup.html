@@ -1,7 +1,9 @@
 {% extends "base.html" %}{% block content %}
 <h1>Badge pickup — {{ event.name }}</h1>
-<form method="post" action="/staff/events/{{ event.id }}/badges">{{ csrf.csrf_token }}<label>Reg-ID <input name="reg_id" maxlength="200" required value="{{ reg_id }}"></label><button>Find badges</button></form>
-{% if reg_id and not rows %}<p>No badge records found for this Reg-ID.</p>{% endif %}
+<p id="reg-id-help">Enter the attendee's Registration identifier (Reg-ID), not their Creator System badge number. The Reg-ID is also shown on their application. Results include every stored Creator and Helper badge for this Event, including inactive badges.</p>
+{% if error %}<p role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="/staff/events/{{ event.id }}/badges">{{ csrf.csrf_token }}<label>Attendee Reg-ID <input name="reg_id" maxlength="200" required value="{{ reg_id }}" aria-describedby="reg-id-help"></label><button>Find badges</button></form>
+{% if reg_id and not rows and not error %}<p>No badge records found for this Reg-ID in {{ event.name }}. Check the attendee's Reg-ID and the selected Event; a reserved badge number is a different identifier.</p>{% endif %}
 {% for row in rows %}<section><h2>Badge {{ row.number }} — {{ row.kind }}</h2><p>Creator: {{ row.creator or 'Name unavailable' }} (application {{ row.application_id }}). {{ 'Active' if row.active else 'Inactive' }}.</p>
 <p>Pickup: {{ row.picked_up_at or 'Not collected' }}</p>
 {% if row.active and not row.picked_up_at %}<form method="post" action="/staff/events/{{ event.id }}/badges/{{ row.id }}">{{ csrf.csrf_token }}<button name="action" value="pickup">Mark this badge collected</button></form>{% endif %}

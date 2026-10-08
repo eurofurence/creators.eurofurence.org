@@ -1,5 +1,23 @@
 <!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Eurofurence Creator System</title><link rel="stylesheet" href="/application-assets/forms.css"></head>
-<body><header><a href="/">Eurofurence Creator System</a> · <a href="/applications">Your application</a> · <a href="/helpers">Your helper relationships</a> · <a href="/staff">Staff</a> · <a href="/account">Session</a></header><main>{% block content %}{% endblock %}</main></body>
+<body>
+<header class="site-header">
+<a href="/">Eurofurence Creator System</a>
+<nav aria-label="Main navigation">
+{% if signed_in %}
+<a href="/applications">Your application</a>
+<a href="/helpers">Your helper relationships</a>
+{% if is_admin %}<a href="/admin/applications">Review applications</a>{% endif %}
+{% if is_staff %}<a href="/staff">Staff</a>{% endif %}
+{% endif %}
+</nav>
+<div class="header-auth">
+{% if signed_in %}<form method="post" action="/auth/logout">{{ csrf.csrf_token }}<button>Logout</button></form>
+{% else %}<a class="button" href="/auth/login"{% if invitation_login %} target="_blank" rel="noopener noreferrer"{% endif %}>Login</a>{% endif %}
+</div>
+</header>
+<main>{% block content %}{% endblock %}</main>
+<script src="/application-assets/picture.js" defer></script>
+</body>
 </html>

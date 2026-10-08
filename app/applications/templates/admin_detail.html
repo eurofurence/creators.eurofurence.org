@@ -1,16 +1,17 @@
 {% extends "base.html" %}
 {% block content %}<h1>Review application</h1>
+{% if error %}<p role="alert">{{ error }} Your entered decision and notes are kept below. Check the current application before trying again; reload the page if another reviewer changed it.</p>{% endif %}
 {% for ban in banned %}<p role="alert">Banned channel warning: {{ ban.platform }} / {{ ban.normalized_account }} — {{ ban.private_reason }}. This warning does not prevent an administrative approval.</p>{% endfor %}
 <p><a href="/admin/pictures/{{ record.id }}">Download profile picture</a></p>
 <dl><dt>Reg-ID</dt><dd>{{ record.reg_id or 'Unavailable' }}</dd><dt>Nickname</dt><dd>{{ record.nickname or 'Unavailable' }}</dd><dt>Email</dt><dd>{{ record.email or 'Unavailable' }}</dd></dl>
 {% include "details.html" %}
 <p><a href="/creators/{{ record.id }}?administrative=true">Manage creator profile, helpers and participation</a></p>
 {% if record.status == 'NEW' %}<p>Step 1: Check that the application is complete, then start review. Approval or rejection after review becomes available in the next step.</p>{% elif record.status == 'ON_REVIEW' %}<p>Step 2: Review the application and picture, then approve or reject it.</p>{% endif %}
-<form method="post">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}">
+<form method="post">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ values.get('version', record.version) }}">
 {% set labels = {'ON_REVIEW': 'Start review' if record.status == 'NEW' else 'Return to review', 'NOT_ACCEPTED': 'Do not accept for review', 'APPROVED': 'Approve application', 'NOT_APPROVED': 'Reject after review'} %}
-<label>Review action <select name="status">{% for status in transitions %}<option value="{{ status }}">{{ labels[status] }}</option>{% endfor %}</select></label>
-<label>Applicant-visible reason (required for rejection or approval reversal)<textarea name="reason" maxlength="4000"></textarea></label>
-<label>Private staff notes<textarea name="staff_notes" maxlength="10000">{{ record.staff_notes }}</textarea></label>
-<label><input type="checkbox" name="exceptional" value="yes">Exceptional correction after the badge change deadline (reason required)</label>
+<label>Review action <select name="status" required><option value="" {% if values.get('status') not in transitions %}selected{% endif %}>Choose a review action</option>{% for status in transitions %}<option value="{{ status }}" {% if values.get('status') == status %}selected{% endif %}>{{ labels[status] }}</option>{% endfor %}</select></label>
+<label>Applicant-visible reason (required for rejection or approval reversal)<textarea name="reason" maxlength="4000">{{ values.get('reason', '') }}</textarea></label>
+<label>Private staff notes<textarea name="staff_notes" maxlength="10000">{{ values.get('staff_notes', record.staff_notes) }}</textarea></label>
+<label><input type="checkbox" name="exceptional" value="yes" {% if values.get('exceptional') == 'yes' %}checked{% endif %}>Exceptional correction after the badge change deadline (reason required)</label>
 <button type="submit">Apply review decision</button></form>
 <p><a href="/admin/applications/{{ record.id }}/correct">Correct application information</a></p><a href="/admin/applications">All applications</a>{% endblock %}

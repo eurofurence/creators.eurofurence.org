@@ -1,6 +1,7 @@
 import re
+import unicodedata
 from dataclasses import dataclass
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 PLATFORMS = (
     "Bluesky",
@@ -11,7 +12,9 @@ PLATFORMS = (
     "TikTok",
     "Twitch",
     "X",
+    "YouTube",
 )
+PLATFORM_LABELS = {platform: platform for platform in PLATFORMS} | {"X": "X (Twitter)"}
 CONTENT_TYPES = ("LIVESTREAM", "SHORTS", "VLOGS")
 HOSTS = {
     "Bluesky": ("bsky.app",),
@@ -21,6 +24,7 @@ HOSTS = {
     "TikTok": ("tiktok.com", "www.tiktok.com"),
     "Twitch": ("twitch.tv", "www.twitch.tv"),
     "X": ("x.com", "www.x.com", "twitter.com", "www.twitter.com"),
+    "YouTube": ("youtube.com", "www.youtube.com"),
 }
 
 
@@ -65,6 +69,10 @@ def normalize_channel(platform: str, original: str, primary: bool) -> ChannelInp
     if len(original) > 2048:
         raise ValueError("Channel input is too long.")
     value = original.strip()
+    if platform == "YouTube" and value.lower().startswith(
+        tuple(host + "/" for host in HOSTS["YouTube"])
+    ):
+        value = "https://" + value
     host = ""
     is_url = "://" in value
     if is_url:
@@ -75,6 +83,18 @@ def normalize_channel(platform: str, original: str, primary: bool) -> ChannelInp
         if platform != "Mastodon" and host not in HOSTS[platform]:
             raise ValueError("The channel URL must belong to the selected platform.")
         path = parts.path.strip("/")
+        if platform == "YouTube" and path.startswith("channel/"):
+            channel_id = path.removeprefix("channel/")
+            if not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", channel_id):
+                raise ValueError("Enter a YouTube /@handle or /channel/ channel URL.")
+            # IDs are opaque and case-sensitive. Do not infer handle/ID equivalence.
+            return ChannelInput(
+                platform,
+                original,
+                "channel:" + channel_id,
+                "https://www.youtube.com/channel/" + channel_id,
+                primary,
+            )
         if platform == "Facebook" and path == "profile.php":
             query = parse_qs(parts.query)
             if (
@@ -95,14 +115,23 @@ def normalize_channel(platform: str, original: str, primary: bool) -> ChannelInp
             if not path.startswith("profile/"):
                 raise ValueError("Use a Bluesky profile URL or complete handle.")
             path = path.removeprefix("profile/")
-        if platform in ("Mastodon", "Threads", "TikTok"):
+        if platform in ("Mastodon", "Threads", "TikTok", "YouTube"):
             if not path.startswith("@"):
                 raise ValueError("Use an account profile URL containing /@handle.")
             path = path[1:]
         value = path
     else:
         value = value.removeprefix("@")
-    if platform == "Mastodon":
+    if platform == "YouTube":
+        value = unicodedata.normalize("NFC", unquote(value) if is_url else value)
+        if not value or not all(
+            c.isalnum() or c in "_.-·" or unicodedata.category(c).startswith("M")
+            for c in value
+        ):
+            raise ValueError("Enter a YouTube handle or channel URL, not a video URL.")
+        account = value.lower()
+        canonical = "https://www.youtube.com/@" + quote(account, safe="_.-")
+    elif platform == "Mastodon":
         if not is_url:
             raise ValueError("Mastodon requires a complete https://host/@account URL.")
         if not re.fullmatch(r"[A-Za-z0-9_]+", value):
@@ -151,19 +180,81 @@ class ApplicationInput:
             https_url(video)
 
 
-def parse_application(form) -> ApplicationInput:
+def parse_channels(form) -> tuple[ChannelInput, ...]:
     platforms, accounts = form.getlist("platform"), form.getlist("account")
     if len(platforms) != len(accounts):
         raise ValueError("Each channel needs a platform and account.")
-    channels = tuple(
-        normalize_channel(p, a, str(i) == form.get("primary"))
-        for i, (p, a) in enumerate(zip(platforms, accounts))
-        if a.strip()
+    channels = []
+    for i, (platform, account) in enumerate(zip(platforms, accounts)):
+        try:
+            channels.append(
+                normalize_channel(platform, account, str(i) == form.get("primary"))
+            )
+        except ValueError as error:
+            raise ValueError(f"Publication channel {i + 1}: {error}") from None
+    return tuple(channels)
+
+
+def video_values(form) -> list[str]:
+    if "video_url" in form or "videos_present" in form:
+        return form.getlist("video_url")
+    # Accept forms opened before the repeated-field editor was deployed.
+    return form.get("videos", "").splitlines()
+
+
+class VideoInputError(ValueError):
+    def __init__(self, errors):
+        self.video_errors = errors
+        super().__init__(
+            " ".join(
+                f"Convention video link {i + 1}: {text}" for i, text in errors.items()
+            )
+        )
+
+
+def parse_videos(form) -> tuple[str, ...]:
+    videos, errors = [], {}
+    for index, value in enumerate(video_values(form)):
+        if value.strip():
+            try:
+                videos.append(https_url(value))
+            except ValueError as error:
+                errors[index] = str(error)
+    if errors:
+        raise VideoInputError(errors)
+    if len(videos) > 10:
+        raise ValueError("Provide at most 10 convention video links.")
+    return tuple(videos)
+
+
+def parse_application(
+    form, existing: ApplicationInput | None = None
+) -> ApplicationInput:
+    # Omission in a partial edit preserves a section. Explicit empty controls clear
+    # optional data or trigger validation; unchecking every content type is invalid.
+    channels = (
+        existing.channels
+        if existing
+        and not any(
+            key in form
+            for key in ("platform", "account", "primary", "channels_present")
+        )
+        else parse_channels(form)
+    )
+    videos = (
+        existing.videos
+        if existing
+        and not any(key in form for key in ("videos", "video_url", "videos_present"))
+        else parse_videos(form)
     )
     result = ApplicationInput(
-        tuple(form.getlist("content_type")),
+        existing.content_types
+        if existing
+        and "content_type" not in form
+        and "content_types_present" not in form
+        else tuple(form.getlist("content_type")),
         channels,
-        tuple(https_url(v) for v in form.get("videos", "").splitlines() if v.strip()),
+        videos,
     )
     result.validate()
     return result

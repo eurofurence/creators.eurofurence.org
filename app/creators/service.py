@@ -1,10 +1,13 @@
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
 
-from app.applications.models import CreatorChannel
-from app.applications.workflow import active_event, applicant_can_edit, get_application
+from app.applications.workflow import (
+    active_event,
+    applicant_can_edit,
+    get_application,
+    replace_channels,
+)
 from app.creators.models import CreatorProfile
 from app.creators.policy import authorize, change_allowed, check_version, require_active
 from app.helpers.service import record_change, touch
@@ -114,33 +117,7 @@ def save_profile(
             version=version,
         )
         profile.channel_name = name
-        existing = {
-            (c.platform, c.normalized_account): c.publicly_hidden
-            for c in db.scalars(
-                select(CreatorChannel).where(
-                    CreatorChannel.application_id == application.id
-                )
-            )
-        }
-        db.execute(
-            delete(CreatorChannel).where(
-                CreatorChannel.application_id == application.id
-            )
-        )
-        for channel in channels:
-            db.add(
-                CreatorChannel(
-                    application_id=application.id,
-                    platform=channel.platform,
-                    original_representation=channel.original_representation,
-                    normalized_account=channel.normalized_account,
-                    canonical_url=channel.canonical_url,
-                    is_primary=channel.is_primary,
-                    publicly_hidden=existing.get(
-                        (channel.platform, channel.normalized_account), False
-                    ),
-                )
-            )
+        replace_channels(db, application.id, channels)
         touch(application)
         db.flush()
         warnings = len(banned_matches(db, application.id))

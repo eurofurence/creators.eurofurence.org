@@ -66,7 +66,7 @@ class CreatorChannel(Base):
     __tablename__ = "creator_channels"
     __table_args__ = (
         CheckConstraint(
-            "platform IN ('Bluesky','Facebook','Instagram','Mastodon','Threads','TikTok','Twitch','X')",
+            "platform IN ('Bluesky','Facebook','Instagram','Mastodon','Threads','TikTok','Twitch','X','YouTube')",
             name="ck_channel_platform",
         ),
         UniqueConstraint(

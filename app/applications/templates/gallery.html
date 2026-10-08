@@ -3,6 +3,6 @@
 {% for creator in creators %}<article>
 <h2>{{ creator.name }}</h2>
 <img src="{{ creator.image_url }}" alt="Profile picture for {{ creator.name }}" width="200" height="200" loading="lazy">
-<ul>{% for channel in creator.channels %}<li><a href="{{ channel.url }}" rel="noopener noreferrer">{{ channel.platform }}: {{ channel.account }}</a>{% if channel.primary %} (Primary){% endif %}</li>{% endfor %}</ul>
+<ul>{% for channel in creator.channels %}<li><a href="{{ channel.url }}" rel="noopener noreferrer">{{ platform_labels[channel.platform] }}: {{ channel.account }}</a>{% if channel.primary %} (Primary){% endif %}</li>{% endfor %}</ul>
 </article>{% else %}<p>No creators are currently published for this event.</p>{% endfor %}
 {% endblock %}

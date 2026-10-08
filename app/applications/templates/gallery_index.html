@@ -1,5 +1,9 @@
 {% extends "base.html" %}{% block content %}
 <h1>Eurofurence Creator System</h1>
-<p><a href="/auth/login">Log in with Eurofurence Identity</a> to apply or manage your participation.</p>
+{% if signed_in %}
+<p><a href="/applications">View your application</a> to apply, check your review status, or manage your approved creator profile and picture.</p>
+<p><a href="/helpers">Manage your helper relationships</a>.</p>
+{% if is_admin %}<p><a href="/admin/applications">Review creator applications</a>.</p>{% endif %}
+{% else %}<p><a href="/auth/login">Login with Eurofurence Identity</a> to apply or manage your participation.</p>{% endif %}
 <h2>Creator galleries</h2><ul>{% for year in years %}<li><a href="/gallery/{{ year }}">Eurofurence {{ year }}</a></li>{% else %}<li>No event is currently available.</li>{% endfor %}</ul>
 {% endblock %}

@@ -211,6 +211,10 @@ def login(client, user_id):
         TimestampSigner(settings.session_secret.get_secret_value())
         .sign(payload)
         .decode(),
+        domain=client.base_url.host
+        if "." in client.base_url.host
+        else client.base_url.host + ".local",
+        path="/",
     )
 
 
@@ -317,7 +321,7 @@ def test_platform_normalization(platform, value, account):
         ("X", "https://x.com/test/status/123"),
         ("Mastodon", "@test"),
         ("Mastodon", "https://user:pass@social.example/@test"),
-        ("YouTube", "test"),
+        ("Unsupported", "test"),
         ("Bluesky", "short"),
         ("Twitch", "javascript:alert(1)"),
         ("Twitch", "https://twitch.tv:444/test"),
@@ -349,7 +353,8 @@ def test_form_submission_dashboard_edit_and_identity_privacy(browser):
     assert submit_form(client).status_code == 303
     page = client.get("/applications")
     assert page.status_code == 200 and "NEW" in page.text
-    assert "attendee@example.test" not in page.text and "REG-123" not in page.text
+    assert "attendee@example.test" not in page.text
+    assert "Attendee Reg-ID:" in page.text and "REG-123" in page.text
     assert page.headers["cache-control"] == "no-store"
     with Session(engine) as db:
         record = db.scalar(select(CreatorApplication))

@@ -68,7 +68,8 @@ try {
     if (-not (Test-Docker -Arguments @('network', 'inspect', 'creators-dev'))) {
         if (-not (Test-Docker -Arguments @('network', 'create', 'creators-dev'))) { Stop-Setup 'Could not create local Docker network.' }
     }
-    & docker compose up -d db s3
+    # Recreating an older S3 container can discard objects held in its writable layer.
+    & docker compose up -d --no-recreate db s3
     if ($LASTEXITCODE -ne 0) { Stop-Setup 'Local dependencies could not be started.' }
     $databaseReady = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
@@ -83,6 +84,7 @@ try {
     & $python -m app.dev.check
     if ($LASTEXITCODE -ne 0) { Stop-Setup 'Local acceptance configuration is NOT READY; resolve the reported setting names.' }
     Write-Host 'Local dependencies ready. Configuration valid.'
+    Write-Host 'Existing containers were preserved. See README storage guidance before applying Compose changes.'
     Write-Host 'Start from the repository root:'
     Write-Host '  .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log'
     Write-Host 'Then open http://127.0.0.1:8000/auth/login'

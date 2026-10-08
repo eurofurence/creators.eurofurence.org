@@ -101,7 +101,21 @@ async def lookup(event_id: int, request: Request, db: DB, user: User):
     service.require_staff(db, user.id, event_id)
     form = await protected_form(request)
     reg_id = form.get("reg_id", "")
-    rows = service.lookup(db, user.id, event_id, reg_id)
+    try:
+        rows = service.lookup(db, user.id, event_id, reg_id)
+    except HTTPException as error:
+        if error.status_code != 422:
+            raise
+        return render(
+            request,
+            "pickup.html",
+            event=service.event_record(db, event_id),
+            rows=[],
+            reg_id=reg_id,
+            error=error.detail,
+            administrative=is_admin(db, user.id),
+            status_code=422,
+        )
     return render(
         request,
         "pickup.html",

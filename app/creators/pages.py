@@ -6,11 +6,19 @@ from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
 from starlette.datastructures import UploadFile
 
-from app.applications.input import normalize_channel
+from app.applications.input import parse_channels
 from app.applications.models import Badge, CreatorApplication, CreatorChannel
-from app.applications.pages import DB, Identity, Registration, User, integer, render
+from app.applications.pages import (
+    DB,
+    Identity,
+    Registration,
+    User,
+    details,
+    integer,
+    render,
+)
 from app.applications.security import protected_form, require_admin
-from app.applications.workflow import active_event, get_application, utc
+from app.applications.workflow import active_event, current_input, get_application, utc
 from app.auth.dependencies import get_current_user
 from app.creators import images, service
 from app.creators.models import CreatorProfile, ProfileImage
@@ -69,6 +77,7 @@ def creator_view(db, actor_id, application_id, administrative):
     ).all()
     now = datetime.now(UTC)
     return {
+        **details(db, application),
         "record": application,
         "event": event,
         "administrative": administrative,
@@ -122,26 +131,47 @@ def creator_page(
 @router.post("/creators/{application_id}/profile")
 async def save_profile(application_id: int, request: Request, db: DB, user: User):
     form = await protected_form(request)
+    actor_id = user.id
+    context = creator_view(db, actor_id, application_id, policy(form)["administrative"])
     try:
-        platforms, accounts = form.getlist("platform"), form.getlist("account")
-        if len(platforms) != len(accounts):
-            raise ValueError("Every channel requires a platform and account.")
-        primary = integer(form, "primary")
-        channels = tuple(
-            normalize_channel(p, a, index == primary)
-            for index, (p, a) in enumerate(zip(platforms, accounts))
+        channels = (
+            parse_channels(form)
+            if any(
+                key in form
+                for key in ("platform", "account", "primary", "channels_present")
+            )
+            else current_input(db, context["record"]).channels
         )
         service.save_profile(
             db,
-            user.id,
+            actor_id,
             application_id,
             integer(form, "version"),
-            form.get("channel_name", ""),
+            form.get(
+                "channel_name",
+                context["profile"].channel_name if context["profile"] else "",
+            ),
             channels,
             **policy(form),
         )
-    except ValueError as error:
-        raise HTTPException(422, str(error)) from None
+    except (ValueError, HTTPException) as error:
+        if isinstance(error, HTTPException) and error.status_code not in (
+            409,
+            422,
+            503,
+        ):
+            raise
+        db.rollback()
+        return render(
+            request,
+            "creator.html",
+            submitted=form,
+            error=error.detail if isinstance(error, HTTPException) else str(error),
+            status_code=error.status_code if isinstance(error, HTTPException) else 422,
+            **creator_view(
+                db, actor_id, application_id, policy(form)["administrative"]
+            ),
+        )
     return return_to_creator(application_id, policy(form)["administrative"])
 
 
@@ -150,6 +180,7 @@ async def picture(
     application_id: int, request: Request, db: DB, user: User, store: Store
 ):
     form = await protected_form(request, upload=True)
+    actor_id = user.id
     try:
         file = form.get("picture")
         if not isinstance(file, UploadFile):
@@ -166,6 +197,20 @@ async def picture(
             store,
             **policy(form),
         )
+    except HTTPException as error:
+        if error.status_code not in (409, 413, 422, 503):
+            raise
+        db.rollback()
+        context = creator_view(
+            db, actor_id, application_id, policy(form)["administrative"]
+        )
+        return render(
+            request,
+            "creator.html" if context["record"].status == "APPROVED" else "form.html",
+            error=error.detail,
+            status_code=error.status_code,
+            **context,
+        )
     finally:
         await form.close()
     if db.get(CreatorApplication, application_id).status != "APPROVED":
@@ -179,7 +224,9 @@ async def picture(
 
 
 @router.get("/creators/{application_id}/picture")
-def view_picture(application_id: int, db: DB, user: User, store: Store):
+def view_picture(
+    application_id: int, request: Request, db: DB, user: User, store: Store
+):
     event = active_event(db)
     application = get_application(db, application_id, event.id)
     if application.user_id != user.id:
@@ -191,17 +238,34 @@ def view_picture(application_id: int, db: DB, user: User, store: Store):
     if (
         image is None
         or image.state != "ACTIVE"
+        or image.event_id != event.id
         or datetime.now(UTC) >= utc(event.data_delete_at)
     ):
         raise HTTPException(404, "Picture not found")
-    key = image.object_key
+    key, image_id = image.object_key, image.id
     db.rollback()
     try:
-        data = store.get(key)
-    except images.ImageStorageUnavailable:
+        data = images.normalize_png(store.get(key))
+    except images.ImageStorageUnavailable, HTTPException:
         raise HTTPException(
             503, "Image storage is unavailable. Please retry."
         ) from None
+    # Recheck access, retention and the current reference after storage I/O.
+    current_user = get_current_user(request, db)
+    event = active_event(db)
+    application = get_application(db, application_id, event.id)
+    if application.user_id != current_user.id:
+        require_admin(db, current_user.id)
+    profile = db.get(CreatorProfile, application_id)
+    image = db.get(ProfileImage, image_id)
+    if (
+        not profile
+        or profile.image_id != image_id
+        or not image
+        or image.state != "ACTIVE"
+        or image.event_id != event.id
+    ):
+        raise HTTPException(404, "Picture not found")
     return Response(
         data,
         media_type="image/png",
@@ -256,7 +320,7 @@ def redeem_page(request: Request, db: DB):
     except HTTPException as error:
         if error.status_code != 401:
             raise
-        return render(request, "invitation_login.html")
+        return render(request, "invitation_login.html", invitation_login=True)
     return render(request, "redeem.html")
 
 

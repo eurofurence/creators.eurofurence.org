@@ -33,10 +33,6 @@ class Settings(BaseSettings):
     oidc_issuer_url: str | None = None
     oidc_redirect_uri: str | None = None
 
-    email_host: str | None = None
-    email_username: str | None = None
-    email_password: SecretStr | None = None
-
     @field_validator("registration_provider")
     @classmethod
     def restrict_manual_registration(cls, value: str, info: ValidationInfo) -> str:
