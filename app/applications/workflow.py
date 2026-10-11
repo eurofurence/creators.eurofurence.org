@@ -13,12 +13,15 @@ from app.applications.models import (
     NotificationOutbox,
 )
 from app.applications.security import require_admin
-from app.applications.service import registration_lookup_for_user
 from app.config import settings
 from app.events.models import Event
-from app.identity.profile import IdentityProfileClient, IdentityProfileUnavailable
-from app.registration.client import RegistrationClient, RegistrationUnavailable
-from app.registration.eligibility import Eligibility, classify_result
+from app.identity.profile import IdentityProfileClient
+from app.registration.client import RegistrationClient
+from app.registration.evidence import (
+    require_record_verified,
+    save_snapshot,
+    verified_snapshot,
+)
 
 TRANSITIONS = {
     "NEW": ("ON_REVIEW", "NOT_ACCEPTED"),
@@ -88,41 +91,6 @@ def get_application(
     if record is None:
         raise HTTPException(404, "Application not found")
     return record
-
-
-async def verified_snapshot(
-    db: Session,
-    user_id: int,
-    registration: RegistrationClient,
-    identity: IdentityProfileClient,
-):
-    lookup = registration_lookup_for_user(db, user_id)
-    db.rollback()  # End read transaction before calling external services.
-    if lookup is None:
-        raise HTTPException(
-            503, "Eligibility verification is unavailable. Please retry."
-        )
-    try:
-        result = await registration.lookup(lookup)
-    except RegistrationUnavailable, TimeoutError:
-        raise HTTPException(
-            503, "Eligibility verification is unavailable. Please retry."
-        ) from None
-    state = classify_result(result, lookup)
-    if state is Eligibility.UNAVAILABLE:
-        raise HTTPException(
-            503, "Eligibility verification is unavailable. Please retry."
-        )
-    if state is Eligibility.INELIGIBLE:
-        raise HTTPException(
-            409,
-            "Registration is currently ineligible. Workflow status has not changed.",
-        )
-    try:
-        email = await identity.email(lookup)
-    except IdentityProfileUnavailable, TimeoutError:
-        email = None
-    return lookup, result, email
 
 
 def audit(db, actor_id, event_id, entity_id, action, changes, reason=""):
@@ -222,9 +190,6 @@ async def submit(
     data: ApplicationInput,
     registration: RegistrationClient,
     identity: IdentityProfileClient,
-    *,
-    picture: bytes | None = None,
-    store=None,
 ) -> int:
     data.validate()
     event = active_event(db)
@@ -235,67 +200,34 @@ async def submit(
         )  # Repeated submit never edits or creates another application.
     if not window_open(event, datetime.now(UTC)):
         raise HTTPException(409, "The application window is closed.")
-    if not picture or store is None:
-        raise HTTPException(
-            422, "A PNG profile picture is required when submitting your application."
-        )
-    lookup, result, email = await verified_snapshot(db, user_id, registration, identity)
-    from app.creators.images import (
-        attach_picture,
-        discard_staged_picture,
-        stage_picture,
-    )
+    evidence = await verified_snapshot(db, user_id, registration, identity)
+    lookup = evidence.lookup
     from app.creators.models import CreatorProfile
 
-    def upload_context():
-        current = active_event(db, lock=True)
-        if (current.id, current.year) != (lookup.event_id, lookup.event_year):
+    with db.begin():
+        event = active_event(db, lock=True)
+        if (event.id, event.year) != (lookup.event_id, lookup.event_year):
             raise HTTPException(409, "The active event changed. Reload and retry.")
-        if not window_open(current, datetime.now(UTC)):
+        existing = application_for_user(db, user_id, event.id)
+        if existing:
+            return existing.id
+        now = datetime.now(UTC)
+        if not window_open(event, now):
             raise HTTPException(409, "The application window is closed.")
-        return current
-
-    image_id = stage_picture(db, picture, store, upload_context)
-    try:
-        with db.begin():
-            event = active_event(db, lock=True)
-            if (event.id, event.year) != (lookup.event_id, lookup.event_year):
-                raise HTTPException(409, "The active event changed. Reload and retry.")
-            existing = application_for_user(db, user_id, event.id)
-            if existing:
-                return existing.id
-            now = datetime.now(UTC)
-            if not window_open(event, now):
-                raise HTTPException(409, "The application window is closed.")
-            record = CreatorApplication(
-                user_id=user_id,
-                event_id=event.id,
-                reg_id=result.reg_id,
-                nickname=result.nickname,
-                email=email,
-                eligibility_checked_at=now,
-                livestream="LIVESTREAM" in data.content_types,
-                shorts="SHORTS" in data.content_types,
-                vlogs="VLOGS" in data.content_types,
-            )
-            db.add(record)
-            db.flush()
-            replace_input(db, record, data)
-            profile = CreatorProfile(application_id=record.id)
-            db.add(profile)
-            attach_picture(db, profile, image_id, event.id)
-            audit(
-                db,
-                user_id,
-                event.id,
-                record.id,
-                "submitted",
-                {"status": "NEW", "picture_supplied": True},
-            )
-            return record.id
-    finally:
-        # ACTIVE images stay attached; duplicate submits/failed commits leave no live orphan.
-        discard_staged_picture(db, store, image_id)
+        record = CreatorApplication(
+            user_id=user_id,
+            event_id=event.id,
+            livestream="LIVESTREAM" in data.content_types,
+            shorts="SHORTS" in data.content_types,
+            vlogs="VLOGS" in data.content_types,
+        )
+        save_snapshot(db, event, evidence, record)
+        db.add(record)
+        db.flush()
+        replace_input(db, record, data)
+        db.add(CreatorProfile(application_id=record.id))
+        audit(db, user_id, event.id, record.id, "submitted", {"status": "NEW"})
+        return record.id
 
 
 def edit(
@@ -357,14 +289,8 @@ async def review(
     require_admin(db, actor_id)
     event = active_event(db)
     record = get_application(db, application_id, event.id)
-    applicant_id = record.user_id
     if record.version != version:
         raise HTTPException(409, "The application changed. Reload before reviewing.")
-    evidence = (
-        await verified_snapshot(db, applicant_id, registration, identity)
-        if target == "APPROVED"
-        else None
-    )
     db.rollback()
     with db.begin():
         require_admin(db, actor_id, lock=True)
@@ -374,22 +300,6 @@ async def review(
             raise HTTPException(
                 409, "The application changed. Reload before reviewing."
             )
-        if target == "APPROVED" or (
-            target == "ON_REVIEW" and record.status != "APPROVED"
-        ):
-            from app.creators.models import CreatorProfile, ProfileImage
-
-            profile = db.get(CreatorProfile, record.id)
-            image = (
-                db.get(ProfileImage, profile.image_id)
-                if profile and profile.image_id
-                else None
-            )
-            if image is None or image.state != "ACTIVE" or image.event_id != event.id:
-                raise HTTPException(
-                    409,
-                    "A valid profile picture is required before review or approval.",
-                )
         previous = record.status
         if target not in TRANSITIONS[previous]:
             raise HTTPException(409, "This status transition is not allowed.")
@@ -411,21 +321,8 @@ async def review(
             or exceptional
         ) and not reason.strip():
             raise HTTPException(422, "An applicant-visible reason is required.")
-        if evidence:
-            lookup, result, email = evidence
-            if (lookup.event_id, lookup.event_year) != (
-                event.id,
-                event.year,
-            ) or record.user_id != applicant_id:
-                raise HTTPException(
-                    409, "The application context changed. Retry verification."
-                )
-            record.reg_id, record.nickname, record.email = (
-                result.reg_id,
-                result.nickname,
-                email,
-            )
-            record.eligibility_checked_at = now
+        if target == "APPROVED":
+            require_record_verified(db, record, "creator")
         record.status, record.outcome_reason, record.staff_notes = (
             target,
             reason.strip(),
@@ -442,8 +339,11 @@ async def review(
                     409, "Restore the withdrawn application before approving it."
                 )
             allocate(db, event.id, actor_id, application_id=record.id)
-            # The profile and image already passed the review gate above. Keep the
-            # submitted picture as the current badge/public image without copying it.
+            from app.creators.models import CreatorProfile
+
+            # Legacy applications may have no profile; preserve existing images.
+            if db.get(CreatorProfile, record.id) is None:
+                db.add(CreatorProfile(application_id=record.id))
             creator_activity_changed(db, actor_id, record, True, reason)
         elif previous == "APPROVED":
             creator_activity_changed(db, actor_id, record, False, reason)

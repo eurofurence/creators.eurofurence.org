@@ -148,5 +148,105 @@ def test_youtube_migration_preserves_data_and_refuses_lossy_downgrade(tmp_path):
     failed = migrate("downgrade", "18df24a910ce", success=False)
     assert "Cannot downgrade while YouTube channels exist" in failed.stderr
     assert retained_rows() == before_youtube_downgrade
+    # SQLite may have already downgraded later, empty revisions before the guard.
+    migrate("upgrade", "head")
+    migrate("check")
+    engine.dispose()
+
+
+def test_registration_evidence_migration_preserves_legacy_rows_without_inventing_proof(
+    tmp_path,
+):
+    url = f"sqlite:///{tmp_path / 'registration-migration.db'}"
+    env = {**os.environ, "DATABASE_URL": url}
+
+    def migrate(*args, success=True):
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", *args],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert (result.returncode == 0) == success, result.stdout + result.stderr
+        return result
+
+    migrate("upgrade", "5c4d8a2f901e")
+    engine = create_engine(url)
+    now = datetime.now(UTC)
+    with Session(engine) as db:
+        db.add(
+            Event(
+                id=1,
+                year=2028,
+                name="Legacy",
+                starts_at=now,
+                ends_at=now,
+                application_open_at=now,
+                application_close_at=now,
+                badge_print_at=now,
+                data_delete_at=now,
+            )
+        )
+        db.add(LocalUser(id=1))
+        db.flush()
+        db.add(
+            CreatorApplication(
+                id=1,
+                user_id=1,
+                event_id=1,
+                status="APPROVED",
+                reg_id="42",
+                vlogs=True,
+                eligibility_checked_at=now,
+            )
+        )
+        db.flush()
+        db.add(CreatorProfile(application_id=1, channel_name="Legacy creator"))
+        db.add(Badge(application_id=1, event_id=1, badge_number=1))
+        db.commit()
+    with engine.connect() as connection:
+        before = connection.execute(text("SELECT * FROM creator_applications")).all()
+    migrate("upgrade", "head")
+    migrate("check")
+    with engine.connect() as connection:
+        assert (
+            connection.execute(text("SELECT * FROM creator_applications")).all()
+            == before
+        )
+        assert (
+            connection.scalar(text("SELECT count(*) FROM registration_verifications"))
+            == 0
+        )
+        assert connection.scalar(text("SELECT badge_number FROM badges")) == 1
+        assert (
+            connection.scalar(text("SELECT channel_name FROM creator_profiles"))
+            == "Legacy creator"
+        )
+    migrate("downgrade", "5c4d8a2f901e")
+    migrate("upgrade", "head")
+    from app.registration.models import RegistrationVerification
+
+    with Session(engine) as db:
+        db.add(
+            RegistrationVerification(
+                user_id=1,
+                event_id=1,
+                event_year=2028,
+                purpose="creator",
+                issuer="https://identity.example/",
+                subject="person-1",
+                status="PAID",
+                reg_id="42",
+                verified_at=now,
+            )
+        )
+        db.commit()
+    result = migrate("downgrade", "5c4d8a2f901e", success=False)
+    assert (
+        "Cannot downgrade while Registration verification evidence exists"
+        in result.stderr
+    )
     migrate("check")
     engine.dispose()

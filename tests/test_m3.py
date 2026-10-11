@@ -56,7 +56,6 @@ def approve(db, user_id=1):
             input_data(f"@creator{user_id}"),
             RegistrationFake(),
             IdentityFake(),
-            **m2.picture_input(),
         )
     )
     record = db.get(CreatorApplication, application_id)
@@ -233,7 +232,6 @@ def test_profile_requires_approval_and_active_participation(application_engine):
                 input_data(),
                 RegistrationFake(),
                 IdentityFake(),
-                **m2.picture_input(),
             )
         )
         with pytest.raises(HTTPException, match="active approved"):
@@ -559,14 +557,14 @@ def test_creator_inactivity_preserves_helpers_and_badges(approved, mode):
 
 
 @pytest.mark.parametrize("target", ["confirmation", "restoration"])
-def test_helper_eligibility_recheck_does_not_change_state(approved, target):
+def test_helper_later_actions_use_original_verification(approved, target):
     db, key = approved
     helper_id = register(db, key)
     if target == "restoration":
         decide(db, helper_id)
         withdraw(db, helper_id, actor=3, helper=True)
     record = db.get(HelperRegistration, helper_id)
-    version, status = record.version, record.status
+    version, checked_at = record.version, record.eligibility_checked_at
     fake = RegistrationFake()
     fake.status = RegistrationStatus.UNKNOWN
     operation = (
@@ -585,11 +583,11 @@ def test_helper_eligibility_recheck_does_not_change_state(approved, target):
             reason="Correction",
         )
     )
-    with pytest.raises(HTTPException) as error:
-        run(operation)
-    assert error.value.status_code == 503
-    assert db.get(HelperRegistration, helper_id).status == status
-    assert db.get(HelperRegistration, helper_id).version == version
+    run(operation)
+    assert fake.calls == 0
+    assert db.get(HelperRegistration, helper_id).status == "CONFIRMED"
+    assert db.get(HelperRegistration, helper_id).version == version + 1
+    assert db.get(HelperRegistration, helper_id).eligibility_checked_at == checked_at
 
 
 @pytest.mark.parametrize(
@@ -812,6 +810,7 @@ def test_postgres_concurrent_redemption_and_allocations(application_engine):
     barrier.reset()
 
     def confirm(helper_id):
+        barrier.wait(timeout=10)
         with Session(application_engine) as db:
             run(
                 helpers.decide(
@@ -820,7 +819,7 @@ def test_postgres_concurrent_redemption_and_allocations(application_engine):
                     helper_id,
                     1,
                     "CONFIRMED",
-                    SynchronizedRegistration(),
+                    RegistrationFake(),
                     IdentityFake(),
                 )
             )
@@ -1104,6 +1103,7 @@ def test_postgres_concurrent_limit_and_same_helper_decision(application_engine):
     barrier.reset()
 
     def confirm(_):
+        barrier.wait(timeout=10)
         with Session(application_engine) as db:
             try:
                 run(
@@ -1113,7 +1113,7 @@ def test_postgres_concurrent_limit_and_same_helper_decision(application_engine):
                         helper_id,
                         1,
                         "CONFIRMED",
-                        SynchronizedRegistration(),
+                        RegistrationFake(),
                         IdentityFake(),
                     )
                 )

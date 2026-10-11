@@ -386,7 +386,6 @@ def test_cleanup_preserves_identity_needed_by_other_event(
                 m2.input_data(),
                 m2.RegistrationFake(),
                 m2.IdentityFake(),
-                **m2.picture_input(),
             )
         )
         expire(db)

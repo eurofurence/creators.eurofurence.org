@@ -157,6 +157,10 @@ def test_reset_preserves_identity_admin_and_scopes_staff_to_fresh_event(
     with Session(application_engine, expire_on_commit=False) as db:
         own = m3.approve(db, 2)
         other = m3.approve(db, 1)
+        for user_id, application_id in ((2, own), (1, other)):
+            m3.images.replace_picture(
+                db, user_id, application_id, 3, m2.application_picture(), store
+            )
         helper = m3.register(db, other, user=2, actor=1)
         m3.decide(db, helper, actor=1)
         assert db.get(CreatorProfile, own).image_id
@@ -270,6 +274,9 @@ def test_reset_image_failure_retains_references_for_retry(
     config = configuration(local_repository)
     with Session(application_engine, expire_on_commit=False) as db:
         app_id = m3.approve(db, 2)
+        m3.images.replace_picture(
+            db, 2, app_id, 3, m2.application_picture(), m2.SubmissionStore()
+        )
         plan = reset._prepare(db, config, 2, "EF DEV TEST 2027", 2027, local_repository)
 
         class FailedStore:
@@ -299,7 +306,10 @@ def test_reset_refuses_arbitrary_user_and_unclear_object_ownership(
     with Session(application_engine, expire_on_commit=False) as db:
         with pytest.raises(SetupError, match="existing local ADMIN"):
             reset._prepare(db, config, 1, "EF DEV TEST 2027", 2027, local_repository)
-        m3.approve(db, 2)
+        app_id = m3.approve(db, 2)
+        m3.images.replace_picture(
+            db, 2, app_id, 3, m2.application_picture(), m2.SubmissionStore()
+        )
         db.scalar(select(ProfileImage)).object_key = "unrelated/asset.png"
         db.commit()
         with pytest.raises(SetupError, match="unclear ownership"):

@@ -31,7 +31,7 @@ def test_repeated_links_add_edit_remove_and_preserve_other_fields(browser):
         links,
         [links[0], links[2]],
         [links[0], "https://video.example/edited"],
-        [],
+        [links[0]],
     ):
         before = acceptance.saved_state(engine)
         response = acceptance.edit_form(
@@ -71,6 +71,7 @@ def test_repeated_links_add_edit_remove_and_preserve_other_fields(browser):
 def test_repeated_links_errors_identify_rows_and_keep_every_entered_value(browser):
     client, _, engine = browser
     assert m2.submit_form(client).status_code == 303
+    acceptance.seed_legacy_picture(engine)
     before = acceptance.saved_state(engine)
     links = [
         "https://video.example/first",

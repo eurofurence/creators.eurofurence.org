@@ -22,6 +22,7 @@ from app.creators.policy import (
 )
 from app.helpers.models import HelperInvitation, HelperRegistration, RedemptionThrottle
 from app.identity.models import LocalUser
+from app.registration.evidence import require_record_verified, save_snapshot
 
 
 def record_change(
@@ -55,17 +56,6 @@ def notify(db, application, recipient_id, kind):
 def touch(application):
     application.version += 1
     application.updated_at = datetime.now(UTC)
-
-
-def check_evidence(event, evidence):
-    if (event.id, event.year) != (evidence[0].event_id, evidence[0].event_year):
-        raise HTTPException(409, "The event changed. Retry verification.")
-
-
-def snapshot(record, evidence):
-    _, result, email = evidence
-    record.reg_id, record.nickname, record.email = result.reg_id, result.nickname, email
-    record.eligibility_checked_at = datetime.now(UTC)
 
 
 def helper_record(db, helper_id, event_id):
@@ -113,8 +103,7 @@ async def invite(
         db, actor_id, application.user_id, administrative=administrative, reason=reason
     )
     require_active(application)
-    creator_id = application.user_id
-    evidence = await verified_snapshot(db, creator_id, registration, identity)
+    db.rollback()
     secret = secrets.token_urlsafe(32)
     with db.begin():
         event = active_event(db, lock=True)
@@ -128,7 +117,7 @@ async def invite(
         )
         require_active(application)
         change_allowed(event, administrative=administrative, exceptional=exceptional)
-        check_evidence(event, evidence)
+        require_record_verified(db, application, "creator")
         now = datetime.now(UTC)
         # Even an administrator cannot create a redeemable invitation after its absolute cap.
         if now >= utc(event.badge_change_deadline_at):
@@ -260,10 +249,11 @@ async def redeem(db, user_id, secret, registration, identity):
     change_allowed(event)
     if application.user_id == user_id:
         raise HTTPException(409, "A creator cannot be their own helper.")
-    evidence = await verified_snapshot(db, user_id, registration, identity)
+    evidence = await verified_snapshot(
+        db, user_id, registration, identity, purpose="helper"
+    )
     with db.begin():
         event = active_event(db, lock=True)
-        check_evidence(event, evidence)
         invitation = valid_invitation(db, secret, event.id)
         application = get_application(db, invitation.application_id, event.id)
         require_active(application)
@@ -288,7 +278,7 @@ async def redeem(db, user_id, secret, registration, identity):
             user_id=user_id,
             invitation_id=invitation.id,
         )
-        snapshot(helper, evidence)
+        save_snapshot(db, event, evidence, helper)
         db.add(helper)
         db.flush()
         touch(application)
@@ -324,13 +314,7 @@ async def decide(
     authorize(
         db, actor_id, application.user_id, administrative=administrative, reason=reason
     )
-    user_id = helper.user_id
     check_version(helper, version)
-    evidence = (
-        await verified_snapshot(db, user_id, registration, identity)
-        if target == "CONFIRMED"
-        else None
-    )
     db.rollback()
     with db.begin():
         event = active_event(db, lock=True)
@@ -354,10 +338,10 @@ async def decide(
         }
         if helper.withdrawn_at or target not in allowed[helper.status]:
             raise HTTPException(409, "This helper transition is not allowed.")
-        if evidence:
-            check_evidence(event, evidence)
+        if target == "CONFIRMED":
+            require_record_verified(db, helper, "helper")
+            require_record_verified(db, application, "creator")
             capacity(db, event, application.id, excluding=helper.id)
-            snapshot(helper, evidence)
         previous = helper.status
         helper.status, helper.version = target, helper.version + 1
         touch(application)
@@ -448,11 +432,6 @@ async def withdraw(
     if restore and not administrative:
         raise HTTPException(403, "Only an administrator may restore participation.")
     check_version(record, version)
-    evidence = (
-        await verified_snapshot(db, record.user_id, registration, identity)
-        if restore
-        else None
-    )
     db.rollback()
     with db.begin():
         event = active_event(db, lock=True)
@@ -471,11 +450,10 @@ async def withdraw(
         check_version(record, version)
         if (record.withdrawn_at is None) == restore:
             raise HTTPException(409, "Participation is already in the requested state.")
-        if evidence:
-            check_evidence(event, evidence)
+        if restore:
+            require_record_verified(db, record, "helper" if helper else "creator")
             if helper and record.status in ("PENDING", "CONFIRMED"):
                 capacity(db, event, application.id, excluding=record.id)
-            snapshot(record, evidence)
         record.withdrawn_at = None if restore else datetime.now(UTC)
         if helper:
             record.version += 1

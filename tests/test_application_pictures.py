@@ -1,29 +1,92 @@
+"""Issue #79: approval precedes picture upload, publication and printing."""
+
 import asyncio
 from datetime import UTC, datetime, timedelta
-from io import BytesIO
 
 import pytest
 import test_applications as m2
+import test_browser_acceptance as acceptance
+import test_m3 as m3
 from fastapi import HTTPException
-from PIL import Image
 from sqlalchemy import event as sql_event
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.applications import workflow
-from app.applications.models import BusinessAudit, CreatorApplication
+from app.applications.models import Badge, BusinessAudit, CreatorApplication
+from app.config import settings
 from app.creators import images
 from app.creators.models import CreatorProfile, ProfileImage
 from app.events.models import Event
 from app.main import app
+from app.staff import exports
 
 application_engine = m2.application_engine
 postgres_engine = m2.postgres_engine
 browser = m2.browser
 
 
-def post_application(client, picture):
+def approve_form(client, engine):
+    key = acceptance.saved_state(engine)["id"]
+    m2.login(client, 2)
+    path = f"/admin/applications/{key}"
+    for version, status in ((1, "ON_REVIEW"), (2, "APPROVED")):
+        response = client.post(
+            path,
+            data={
+                "csrf_token": m2.csrf(client, path),
+                "version": version,
+                "status": status,
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303, response.text
+    m2.login(client, 1)
+    return key
+
+
+def upload(client, key, data, **changes):
+    path = f"/creators/{key}"
     return client.post(
+        path + "/picture",
+        data={"csrf_token": m2.csrf(client, path), "version": 3, **changes},
+        files={"picture": ("untrusted.exe", data, "application/octet-stream")}
+        if data is not None
+        else None,
+        follow_redirects=False,
+    )
+
+
+def test_submit_review_and_approve_without_picture_or_storage(browser):
+    client, _, engine = browser
+
+    def no_storage():
+        pytest.fail("Application submission/review must not depend on image storage")
+
+    app.dependency_overrides[images.get_image_store] = no_storage
+    form = client.get("/applications/form")
+    assert 'name="picture"' not in form.text
+    assert "profile picture is requested after approval" in form.text
+    assert m2.submit_form(client).status_code == 303
+    key = approve_form(client, engine)
+    for path in ("/applications", f"/creators/{key}"):
+        page = client.get(path)
+        assert "No valid profile picture has been supplied" in page.text
+        assert "printing" in page.text
+    page = client.get(f"/creators/{key}").text
+    assert "Use the same profile picture as on your primary publication channel" in page
+    assert "Upload picture" in page
+    assert client.get("/api/v1/events/2028/creators").json() == []
+    with Session(engine) as db:
+        assert db.get(CreatorApplication, key).status == "APPROVED"
+        assert db.get(CreatorProfile, key).image_id is None
+        assert db.scalar(select(Badge.badge_number)) == 1
+        assert db.scalar(select(func.count()).select_from(ProfileImage)) == 0
+
+
+def test_legacy_application_upload_is_rejected_with_instructions(browser):
+    client, _, engine = browser
+    response = client.post(
         "/applications/form",
         data={
             "csrf_token": m2.csrf(client, "/applications/form"),
@@ -31,23 +94,19 @@ def post_application(client, picture):
             "platform": "Twitch",
             "account": "creator",
             "primary": "0",
+            "video_url": "https://video.example/convention",
         },
-        files={"picture": ("untrusted-name.exe", picture, "application/octet-stream")}
-        if picture is not None
-        else None,
-        follow_redirects=False,
+        files={"picture": ("old-form.png", m2.application_picture(), "image/png")},
     )
-
-
-@pytest.mark.parametrize("picture", [None, b"not a PNG"])
-def test_missing_or_invalid_picture_cannot_submit(browser, picture):
-    client, _, engine = browser
-    response = post_application(client, picture)
     assert response.status_code == 422
+    assert (
+        "Upload your profile picture from your Creator profile after approval"
+        in response.text
+    )
     assert 'value="creator"' in response.text
     with Session(engine) as db:
-        assert db.scalar(select(func.count()).select_from(CreatorApplication)) == 0
-        assert db.scalar(select(func.count()).select_from(ProfileImage)) == 0
+        assert db.scalar(select(CreatorApplication)) is None
+        assert db.scalar(select(ProfileImage)) is None
 
 
 @pytest.mark.parametrize("field", ["account", "csrf_token"])
@@ -65,199 +124,181 @@ def test_upload_cannot_replace_a_text_form_field(browser, field):
     )
     assert response.status_code == 422
     with Session(engine) as db:
-        assert db.scalar(select(func.count()).select_from(CreatorApplication)) == 0
-        assert db.scalar(select(func.count()).select_from(ProfileImage)) == 0
+        assert db.scalar(select(CreatorApplication)) is None
 
 
-def test_application_picture_visible_to_reviewer_before_approval(browser):
-    client, _, engine = browser
-    assert 'name="picture"' in client.get("/applications/form").text
-    assert post_application(client, m2.application_picture()).status_code == 303
-    with Session(engine) as db:
-        record = db.scalar(select(CreatorApplication))
-        key = record.id
-        assert record.status == "NEW"
-        profile = db.get(CreatorProfile, key)
-        assert db.get(ProfileImage, profile.image_id).state == "ACTIVE"
-    assert f"/creators/{key}/picture" in client.get("/applications").text
-    assert client.get("/api/v1/events/2028/creators").json() == []
-    m2.login(client, 2)
-    review = client.get(f"/admin/applications/{key}")
-    assert f"/creators/{key}/picture" in review.text
-    assert "Start review" in review.text and "Step 1" in review.text
-    response = client.get(f"/creators/{key}/picture")
-    assert response.status_code == 200
-    with Image.open(BytesIO(response.content)) as image:
-        assert image.size == (600, 600)
-        assert image.info["dpi"] == pytest.approx((300, 300), abs=0.01)
-    assert response.headers["cache-control"] == "no-store"
-    m2.review_record(engine, key, 1, "ON_REVIEW")
-    review = client.get(f"/admin/applications/{key}")
-    assert "Step 2" in review.text and "Approve application" in review.text
-    m2.login(client, 3)
-    assert client.get(f"/creators/{key}/picture").status_code == 403
-    client.cookies.clear()
-    assert client.get(f"/creators/{key}/picture").status_code == 401
-
-
-@pytest.mark.parametrize("failure", ["storage", "database", "closed_window"])
-def test_failed_submission_keeps_no_partial_application_or_live_orphan(
+@pytest.mark.parametrize("failure", ["database", "closed_window", "changed_event"])
+def test_submission_transaction_and_revalidation_without_image_staging(
     application_engine, failure
 ):
-    with Session(application_engine, expire_on_commit=False) as db:
+    def fail_audit(*_):
+        raise RuntimeError("injected audit failure")
 
-        class Store(m2.SubmissionStore):
-            def put(self, key, data):
-                assert not db.in_transaction()
-                super().put(key, data)
-                if failure == "storage":
-                    raise images.ImageStorageUnavailable
+    registration = m2.RegistrationFake()
+    if failure != "database":
+
+        def change_context():
+            with Session(application_engine) as other:
+                event = other.get(Event, 1)
                 if failure == "closed_window":
-                    with Session(application_engine) as other:
-                        other.get(Event, 1).application_close_at = datetime.now(
-                            UTC
-                        ) - timedelta(seconds=1)
-                        other.commit()
+                    event.application_close_at = datetime.now(UTC) - timedelta(
+                        seconds=1
+                    )
+                else:
+                    event.year += 1
+                other.commit()
 
-            def delete(self, key):
-                assert not db.in_transaction()
-                super().delete(key)
-
-        def fail_audit(*_):
-            raise RuntimeError("injected audit failure")
-
-        store = Store()
-        if failure == "database":
-            sql_event.listen(BusinessAudit, "before_insert", fail_audit)
-        try:
+        registration.hook = change_context
+    else:
+        sql_event.listen(BusinessAudit, "before_insert", fail_audit)
+    try:
+        with Session(application_engine) as db:
             with pytest.raises((HTTPException, RuntimeError)):
                 asyncio.run(
                     workflow.submit(
-                        db,
-                        1,
-                        m2.input_data(),
-                        m2.RegistrationFake(),
-                        m2.IdentityFake(),
-                        picture=m2.application_picture(),
-                        store=store,
+                        db, 1, m2.input_data(), registration, m2.IdentityFake()
                     )
                 )
-        finally:
-            if failure == "database":
-                sql_event.remove(BusinessAudit, "before_insert", fail_audit)
-        assert db.scalar(select(func.count()).select_from(CreatorApplication)) == 0
-        assert db.scalar(select(func.count()).select_from(CreatorProfile)) == 0
-        assert db.scalar(select(func.count()).select_from(ProfileImage)) == 0
-        assert store.objects == {}
+            db.rollback()
+            for model in (
+                CreatorApplication,
+                CreatorProfile,
+                ProfileImage,
+                BusinessAudit,
+            ):
+                assert db.scalar(select(func.count()).select_from(model)) == 0
+    finally:
+        if failure == "database":
+            sql_event.remove(BusinessAudit, "before_insert", fail_audit)
 
 
-def test_new_picture_edit_locks_on_review_and_admin_correction_is_explicit(browser):
+@pytest.mark.parametrize("status", ["NEW", "ON_REVIEW", "NOT_APPROVED", "NOT_ACCEPTED"])
+@pytest.mark.parametrize("administrative", [False, True])
+def test_picture_upload_requires_approval_even_for_direct_requests(
+    browser, status, administrative
+):
     client, _, engine = browser
-    assert post_application(client, m2.application_picture()).status_code == 303
+    assert m2.submit_form(client).status_code == 303
     with Session(engine) as db:
-        key = db.scalar(select(CreatorApplication.id))
-    path = f"/creators/{key}/picture"
-    token = m2.csrf(client, "/applications/form")
-    assert (
-        client.post(
-            path,
-            data={"csrf_token": token, "version": 1},
-            files={"picture": ("new.png", m2.application_picture())},
-        ).status_code
-        == 200
-    )
-    m2.review_record(engine, key, 2, "ON_REVIEW")
-    assert (
-        client.post(
-            path,
-            data={"csrf_token": token, "version": 3},
-            files={"picture": ("new.png", m2.application_picture())},
-        ).status_code
-        == 409
-    )
-    m2.login(client, 3)
-    assert (
-        client.post(
-            path,
-            data={"csrf_token": m2.csrf(client, "/account"), "version": 3},
-            files={"picture": ("new.png", m2.application_picture())},
-        ).status_code
-        == 404
-    )
-    m2.login(client, 2)
-    token = m2.csrf(client, f"/admin/applications/{key}/correct")
-    assert (
-        client.post(
-            path,
-            data={
-                "csrf_token": token,
-                "version": 3,
-                "administrative": "yes",
-                "reason": "Correction during review",
-            },
-            files={"picture": ("fixed.png", m2.application_picture())},
-        ).status_code
-        == 200
-    )
-    with Session(engine) as db:
-        assert db.get(CreatorApplication, key).status == "ON_REVIEW"
-        assert db.get(CreatorApplication, key).version == 4
-    m2.review_record(engine, key, 4, "APPROVED")
-
-
-def test_legacy_application_requires_picture_before_review(browser):
-    client, _, engine = browser
-    key = m2.submit_record(engine)
-    with Session(engine) as db:
-        db.get(CreatorProfile, key).image_id = None
+        record = db.scalar(select(CreatorApplication))
+        record.status = status
+        record.outcome_reason = "Fixture review decision"
+        key = record.id
         db.commit()
-    with pytest.raises(HTTPException, match="picture is required"):
-        m2.review_record(engine, key, 1, "ON_REVIEW")
-    form = client.get("/applications/form")
-    assert "Upload your picture before" in form.text
+    before = acceptance.saved_state(engine)
+    m2.login(client, 2 if administrative else 1)
+    path = f"/creators/{key}"
+    page = path + ("?administrative=true" if administrative else "")
+    assert 'name="picture"' not in client.get(page).text
+    response = client.post(
+        path + "/picture",
+        data={
+            "csrf_token": m2.csrf(client, page),
+            "version": 1,
+            "administrative": "yes" if administrative else "no",
+            "reason": "Correct picture",
+        },
+        files={"picture": ("picture.png", m2.application_picture())},
+    )
+    assert response.status_code == 409
+    assert "active approved creator is required" in response.text
+    assert acceptance.saved_state(engine) == before
+    assert not app.dependency_overrides[images.get_image_store]().objects
+
+
+@pytest.mark.parametrize(
+    "problem", ["missing", "invalid", "jpeg", "dimensions", "oversized"]
+)
+def test_invalid_approved_upload_preserves_profile_and_shows_error(
+    browser, monkeypatch, problem
+):
+    client, _, engine = browser
+    assert m2.submit_form(client).status_code == 303
+    key = approve_form(client, engine)
+    before = acceptance.saved_state(engine)
+    data = {
+        "missing": None,
+        "invalid": b"not a PNG",
+        "jpeg": m3.png(format="JPEG"),
+        "dimensions": m3.png(size=(599, 600)),
+        "oversized": m2.application_picture(),
+    }[problem]
+    if problem == "oversized":
+        monkeypatch.setattr(settings, "profile_image_max_bytes", len(data) - 1)
+    response = upload(client, key, data)
+    assert response.status_code == (413 if problem == "oversized" else 422)
+    assert 'role="alert"' in response.text
+    assert acceptance.saved_state(engine) == before
+    assert not app.dependency_overrides[images.get_image_store]().objects
+
+
+def test_missing_picture_blocks_print_but_not_approval_reversal_or_reapproval(browser):
+    client, registration, engine = browser
+    assert m2.submit_form(client).status_code == 303
+    key = approve_form(client, engine)
+    store = app.dependency_overrides[images.get_image_store]()
+    with Session(engine) as db:
+        profile = db.get(CreatorProfile, key)
+        profile.channel_name = "Approved creator"
+        public_id = profile.public_id
+        db.commit()
+        with pytest.raises(HTTPException) as error:
+            asyncio.run(exports.export(db, 2, 1, registration, store))
+        assert error.value.status_code == 409
+        assert "Profile picture missing. Upload a valid PNG" in str(error.value.detail)
+        assert error.value.detail["problems"][0]["number"] == 1
+        assert db.get(CreatorApplication, key).status == "APPROVED"
+        assert asyncio.run(
+            exports.export(db, 2, 1, registration, store, print_ready=False)
+        )
+    assert client.get("/api/v1/events/2028/creators").json() == []
+    assert "Approved creator" not in client.get("/gallery/2028").text
+    assert (
+        client.get(f"/api/v1/events/2028/creators/{public_id}/image").status_code == 404
+    )
+    m2.review_record(engine, key, 3, "ON_REVIEW")
+    m2.review_record(engine, key, 4, "APPROVED")
+    with Session(engine) as db:
+        assert db.scalar(select(Badge.badge_number)) == 1
+        assert db.get(CreatorProfile, key).image_id is None
+
+
+def test_legacy_record_without_profile_can_be_approved_and_completed(browser):
+    client, _, engine = browser
+    assert m2.submit_form(client).status_code == 303
+    key = acceptance.saved_state(engine)["id"]
+    with Session(engine) as db:
+        db.delete(db.get(CreatorProfile, key))
+        db.commit()
+    m2.review_record(engine, key, 1, "ON_REVIEW")
+    m2.review_record(engine, key, 2, "APPROVED")
+    assert upload(client, key, m2.application_picture()).status_code == 303
+    with Session(engine) as db:
+        assert db.get(CreatorProfile, key).image_id is not None
+
+
+def test_approved_upload_requires_csrf_and_reports_storage_outage(browser):
+    client, _, engine = browser
+    assert m2.submit_form(client).status_code == 303
+    key = approve_form(client, engine)
     assert (
         client.post(
             f"/creators/{key}/picture",
-            data={"csrf_token": m2.csrf(client, "/applications/form"), "version": 1},
-            files={"picture": ("picture.png", m2.application_picture())},
-        ).status_code
-        == 200
-    )
-    m2.review_record(engine, key, 2, "ON_REVIEW")
-
-
-def test_submission_requires_csrf_and_storage_failure_is_retryable(browser):
-    client, _, engine = browser
-    assert (
-        client.post(
-            "/applications/form",
-            files={"picture": ("picture.png", m2.application_picture())},
+            files={"picture": ("profile.png", m2.application_picture())},
         ).status_code
         == 403
     )
-    store = m2.SubmissionStore()
+    store = app.dependency_overrides[images.get_image_store]()
 
     def unavailable(*_):
         raise images.ImageStorageUnavailable
 
     store.put = unavailable
-    app.dependency_overrides[images.get_image_store] = lambda: store
-    response = post_application(client, m2.application_picture())
-    assert response.status_code == 503
-    assert "Image storage is unavailable" in response.text
+    response = upload(client, key, m2.application_picture())
+    assert (
+        response.status_code == 503 and "Image storage is unavailable" in response.text
+    )
     with Session(engine) as db:
-        assert db.scalar(select(func.count()).select_from(CreatorApplication)) == 0
-
-
-def test_missing_picture_blocks_approval_but_not_approval_revocation(
-    application_engine,
-):
-    key = m2.submit_record(application_engine)
-    m2.review_record(application_engine, key, 1, "ON_REVIEW")
-    m2.review_record(application_engine, key, 2, "APPROVED")
-    with Session(application_engine) as db:
-        db.get(CreatorProfile, key).image_id = None
-        db.commit()
-    m2.review_record(application_engine, key, 3, "ON_REVIEW")
-    with pytest.raises(HTTPException, match="picture is required"):
-        m2.review_record(application_engine, key, 4, "APPROVED")
+        assert db.get(CreatorProfile, key).image_id is None
+        assert db.get(CreatorApplication, key).status == "APPROVED"
+        assert db.scalar(select(ProfileImage)) is None

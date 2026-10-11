@@ -6,14 +6,14 @@
 {% if index in errors %}<p id="video-error-{{ index }}" class="field-error">{{ errors[index] }}</p>{% endif %}
 </div>
 {% endmacro %}
-<fieldset><legend>Existing convention videos (optional)</legend>
+<fieldset><legend>Existing convention videos (at least one required)</legend>
 <input type="hidden" name="videos_present" value="yes">
-<p id="videos-help" class="hint">Links to videos you have already made at conventions. Add up to 10 HTTPS links. These are separate from your publication channels. Remove a link only if you no longer want to include it; you can save with no links.</p>
+<p id="videos-help" class="hint">Provide at least one existing convention video URL, linking to a video you have already made at a convention. Add up to 10 HTTPS links. These are separate from your publication channels. Remove a link only if you no longer want to include it; at least one valid link must remain when saving.</p>
 <div id="video-links">
 {% for value in values.getlist('video_url') or [''] %}{{ video_row(value, loop.index0) }}{% endfor %}
 </div>
 <template id="video-row-template">{{ video_row(errors={}) }}</template>
 <button type="button" id="add-video">Add another link</button>
 <p id="video-feedback" class="hint" aria-live="polite"></p>
-<noscript><p>Enable JavaScript to add or remove rows. You can edit existing links or clear their fields to remove them.</p></noscript>
+<noscript><p>Enable JavaScript to add or remove rows. You can edit existing links or clear their fields to remove them. At least one valid link must remain.</p></noscript>
 </fieldset>

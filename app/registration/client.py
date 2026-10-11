@@ -56,5 +56,10 @@ def get_registration_client() -> RegistrationClient:
         return ManualTestRegistrationClient(
             settings.registration_manual_file, environment=settings.environment
         )
-    # No live transport until the EF Registration contract and access are supplied.
+    if settings.registration_provider == "v1":
+        from app.registration.v1 import RegistrationV1Client
+
+        return RegistrationV1Client(
+            settings.registration_v1_events, environment=settings.environment
+        )
     return UnavailableRegistrationClient()

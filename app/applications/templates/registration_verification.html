@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Registration verification — {{ event.name }}</h1>
+<p>Verify your {{ purpose }} eligibility once for this event. Registration must confirm a paid or checked-in ticket. Creator and helper verification are separate.</p>
+{% if error %}<p role="alert">{{ error }}</p>{% endif %}
+{% if verified %}<p role="status">Registration verified. Return to your application or helper invitation and submit it. Later approval, helper decisions and printing use this evidence without another Registration check.</p>
+{% else %}<p>If payment is pending or verification is unavailable, you can retry. Verification may take you to Eurofurence Identity. Sign in with the same account. Your provider tokens are not saved.</p>
+<form method="post">{{ csrf.csrf_token }}<input type="hidden" name="purpose" value="{{ purpose }}"><button>Verify Registration</button></form>{% endif %}
+<p><a href="{{ '/applications' if purpose == 'creator' else '/helpers' }}">Return to {{ 'your application' if purpose == 'creator' else 'your helper relationships' }}</a>. If you opened this page in another tab, return to the original tab to keep your entered values or invitation.</p>
+{% endblock %}

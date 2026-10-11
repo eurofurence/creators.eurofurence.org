@@ -23,6 +23,7 @@ from app.creators import images
 from app.creators.models import CreatorProfile, ProfileImage
 from app.main import app
 from app.moderation import service as moderation
+from app.registration.models import RegistrationVerification
 from app.staff import exports
 
 application_engine = m2.application_engine
@@ -113,6 +114,14 @@ def saved_state(engine):
         }
 
 
+def seed_legacy_picture(engine):
+    m2.legacy_picture(
+        engine,
+        saved_state(engine)["id"],
+        app.dependency_overrides[images.get_image_store](),
+    )
+
+
 def edit_form(client, state, **changes):
     return client.post(
         "/applications/form",
@@ -129,6 +138,7 @@ def edit_form(client, state, **changes):
 def test_partial_application_edits_keep_related_data_and_picture(browser):
     client, _, engine = browser
     assert m2.submit_form(client).status_code == 303
+    seed_legacy_picture(engine)
     original = saved_state(engine)
     with Session(engine) as db:
         db.get(CreatorChannel, original["channels"][0][0]).publicly_hidden = True
@@ -155,14 +165,16 @@ def test_partial_application_edits_keep_related_data_and_picture(browser):
     assert [c[0] for c in changed["channels"]] == [c[0] for c in original["channels"]]
     assert changed["channels"][0][4] is True
     assert changed["channels"][1][3] is True
-    assert edit_form(client, changed, videos="").status_code == 303
-    assert saved_state(engine)["videos"] == []
-    assert saved_state(engine)["image_id"] == original["image_id"]
+    response = edit_form(client, changed, videos="")
+    assert response.status_code == 422
+    assert "Provide at least one existing convention video URL." in response.text
+    assert saved_state(engine) == changed
 
 
 def test_edit_validation_and_conflicts_keep_entered_and_omitted_sections(browser):
     client, _, engine = browser
     assert m2.submit_form(client).status_code == 303
+    seed_legacy_picture(engine)
     original = saved_state(engine)
     response = edit_form(
         client,
@@ -191,6 +203,7 @@ def test_edit_validation_and_conflicts_keep_entered_and_omitted_sections(browser
 def test_admin_correction_errors_keep_existing_image_and_fields(browser):
     client, _, engine = browser
     assert m2.submit_form(client).status_code == 303
+    seed_legacy_picture(engine)
     original = saved_state(engine)
     m2.login(client, 2)
     path = f"/admin/applications/{original['id']}/correct"
@@ -225,7 +238,9 @@ def test_admin_correction_errors_keep_existing_image_and_fields(browser):
         assert changed[field] == original[field]
 
 
-def test_one_image_from_submission_through_approval_publication_and_print(browser):
+def test_existing_picture_survives_approval_publication_and_print_then_replacement(
+    browser,
+):
     client, registration, engine = browser
     store = app.dependency_overrides[images.get_image_store]()
     assert (
@@ -234,6 +249,7 @@ def test_one_image_from_submission_through_approval_publication_and_print(browse
         ).status_code
         == 303
     )
+    seed_legacy_picture(engine)
     original = saved_state(engine)
     key = original["id"]
     path = f"/creators/{key}"
@@ -339,19 +355,18 @@ def test_legacy_approved_record_without_image_requires_real_upload(browser):
     m2.review_record(engine, key, 2, "APPROVED")
     with Session(engine) as db:
         profile = db.get(CreatorProfile, key)
-        image = db.get(ProfileImage, profile.image_id)
-        store.objects.pop(image.object_key)
         profile.image_id = None
         profile.channel_name = "Legacy creator"
-        db.flush()
-        db.delete(image)
         db.commit()
         with pytest.raises(HTTPException) as error:
             asyncio.run(exports.export(db, 2, 1, registration, store))
-        assert "Missing image_id" in str(error.value.detail)
+        assert "Profile picture missing. Upload a valid PNG" in str(error.value.detail)
     path = f"/creators/{key}"
     page = client.get(path)
-    assert "No picture has been supplied" in page.text and "Upload picture" in page.text
+    assert (
+        "No valid profile picture has been supplied" in page.text
+        and "Upload picture" in page.text
+    )
     assert (
         client.post(
             path + "/picture",
@@ -371,6 +386,7 @@ def test_legacy_approved_record_without_image_requires_real_upload(browser):
 def test_profile_validation_retains_values_and_related_data(browser):
     client, _, engine = browser
     assert m2.submit_form(client).status_code == 303
+    seed_legacy_picture(engine)
     original = saved_state(engine)
     key = original["id"]
     m2.review_record(engine, key, 1, "ON_REVIEW")
@@ -437,12 +453,14 @@ def test_header_home_logout_and_current_authorization(browser):
 
 @pytest.mark.parametrize("failure", ["reason", "conflict", "registration"])
 def test_review_errors_render_html_and_keep_notes_without_saving(browser, failure):
-    client, registration, engine = browser
+    client, _, engine = browser
     assert m2.submit_form(client).status_code == 303
     key = saved_state(engine)["id"]
     if failure == "registration":
         m2.review_record(engine, key, 1, "ON_REVIEW")
-        registration.failure = m2.RegistrationUnavailable()
+        with Session(engine) as db:
+            db.delete(db.scalar(select(RegistrationVerification)))
+            db.commit()
     before = saved_state(engine)
     with Session(engine) as db:
         previous_notes = db.get(CreatorApplication, key).staff_notes
@@ -466,7 +484,7 @@ def test_review_errors_render_html_and_keep_notes_without_saving(browser, failur
         == {
             "reason": 422,
             "conflict": 409,
-            "registration": 503,
+            "registration": 409,
         }[failure]
     )
     assert response.headers["content-type"].startswith("text/html")
@@ -488,21 +506,23 @@ def test_review_errors_render_html_and_keep_notes_without_saving(browser, failur
 
 
 def test_profile_completion_and_english_picture_controls(browser):
-    client, _, engine = browser
+    client, registration, engine = browser
     page = client.get("/applications/form")
-    assert "Choose PNG picture" in page.text
-    assert "No file selected" in page.text
-    assert 'aria-label="Choose PNG picture"' in page.text
-    assert "/application-assets/picture.js" in page.text
+    assert 'name="picture"' not in page.text
     assert m2.submit_form(client).status_code == 303
     key = saved_state(engine)["id"]
-    assert "Choose PNG picture" in client.get("/applications/form").text
+    assert "Choose PNG picture" not in client.get("/applications/form").text
     m2.review_record(engine, key, 1, "ON_REVIEW")
     m2.review_record(engine, key, 2, "APPROVED")
     page = client.get("/applications")
     assert "Your public creator name is still missing" in page.text
     path = f"/creators/{key}"
-    assert "Choose PNG picture" in client.get(path).text
+    page = client.get(path)
+    assert "Choose PNG picture" in page.text
+    assert "No file selected" in page.text
+    assert 'aria-label="Choose PNG picture"' in page.text
+    assert "/application-assets/picture.js" in page.text
+    assert "same profile picture as on your primary publication channel" in page.text
     assert (
         client.post(
             path + "/profile",
@@ -519,3 +539,32 @@ def test_profile_completion_and_english_picture_controls(browser):
         "Your public creator name is still missing"
         not in client.get("/applications").text
     )
+    assert client.get("/api/v1/events/2028/creators").json() == []
+    assert "Ready creator" not in client.get("/gallery/2028").text
+    assert (
+        client.post(
+            path + "/picture",
+            data={"csrf_token": m2.csrf(client, path), "version": 4},
+            files={"picture": ("profile.png", m2.application_picture())},
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+    rows = client.get("/api/v1/events/2028/creators").json()
+    assert len(rows) == 1 and rows[0]["name"] == "Ready creator"
+    assert client.get(rows[0]["image_url"]).content == images.normalize_png(
+        m2.application_picture()
+    )
+    assert "Ready creator" in client.get("/gallery/2028").text
+    with Session(engine) as db:
+        assert db.get(CreatorApplication, key).status == "APPROVED"
+        assert db.scalar(select(Badge.badge_number)) == 1
+        assert asyncio.run(
+            exports.export(
+                db,
+                2,
+                1,
+                registration,
+                app.dependency_overrides[images.get_image_store](),
+            )
+        )

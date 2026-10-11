@@ -4,12 +4,15 @@ from typing import Literal
 from pydantic import Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.registration.configuration import RegistrationV1Event
+
 
 class Settings(BaseSettings):
     app_name: str = "Eurofurence Creator System"
     environment: str = "development"
-    registration_provider: Literal["unavailable", "manual_test"] = "unavailable"
+    registration_provider: Literal["unavailable", "manual_test", "v1"] = "unavailable"
     registration_manual_file: Path | None = Field(default=None, validate_default=True)
+    registration_v1_events: list[RegistrationV1Event] = Field(default_factory=list)
     active_event_id: int | None = Field(default=None, gt=0)
     badge_sequence_start: int = Field(default=1, gt=0)
     profile_image_max_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
@@ -54,11 +57,19 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("registration_v1_events")
+    @classmethod
+    def unique_registration_events(cls, value: list[RegistrationV1Event]):
+        if len({event.event_id for event in value}) != len(value):
+            raise ValueError("Registration v1 event routes must have unique event IDs")
+        return value
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         env_ignore_empty=True,
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
 

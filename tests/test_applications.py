@@ -94,13 +94,30 @@ class SubmissionStore:
         self.objects.pop(key, None)
 
 
-def picture_input():
-    return {"picture": application_picture(), "store": SubmissionStore()}
+def legacy_picture(engine, application_id, store):
+    """Represent an already retained image without using the new upload workflow."""
+    from app.creators.models import CreatorProfile, ProfileImage
+
+    with Session(engine) as db:
+        record = db.get(CreatorApplication, application_id)
+        image = ProfileImage(
+            event_id=record.event_id,
+            object_key=f"profiles/legacy-{application_id}",
+            state="ACTIVE",
+            delete_after=db.get(Event, record.event_id).data_delete_at,
+        )
+        db.add(image)
+        db.flush()
+        db.get(CreatorProfile, application_id).image_id = image.id
+        db.commit()
+        store.objects[image.object_key] = images.normalize_png(application_picture())
 
 
 def input_data(handle="@creator"):
     return ApplicationInput(
-        ("VLOGS",), (normalize_channel("Twitch", handle, True),), ()
+        ("VLOGS",),
+        (normalize_channel("Twitch", handle, True),),
+        ("https://video.example/convention",),
     )
 
 
@@ -256,7 +273,6 @@ def submit_form(client, **changes):
     return client.post(
         "/applications/form",
         data=data,
-        files={"picture": ("picture.png", application_picture(), "image/png")},
         follow_redirects=False,
     )
 
@@ -270,7 +286,6 @@ def submit_record(engine, user=1):
                 input_data(),
                 RegistrationFake(),
                 IdentityFake(),
-                **picture_input(),
             )
         )
 
@@ -365,7 +380,6 @@ def test_form_submission_dashboard_edit_and_identity_privacy(browser):
         client,
         application_id=str(record_id),
         version="1",
-        videos="",
         account=["@Changed", "https://social.example/@Other"],
     )
     assert response.status_code == 303
@@ -457,28 +471,24 @@ def test_workflow_side_effects_reserved_badge_and_edit_locks(application_engine)
     "state,code",
     [(RegistrationStatus.UNKNOWN, 503), (RegistrationStatus.INELIGIBLE, 409)],
 )
-def test_submission_and_approval_fail_closed_without_state_changes(
+def test_failed_submission_can_retry_and_approval_uses_saved_evidence(
     application_engine, state, code
 ):
     fake = RegistrationFake()
     fake.status = state
     with Session(application_engine) as db:
         with pytest.raises(HTTPException) as error:
-            asyncio.run(
-                workflow.submit(
-                    db, 1, input_data(), fake, IdentityFake(), **picture_input()
-                )
-            )
+            asyncio.run(workflow.submit(db, 1, input_data(), fake, IdentityFake()))
         assert error.value.status_code == code
     record_id = submit_record(application_engine)
     review_record(application_engine, record_id, 1, "ON_REVIEW")
-    with pytest.raises(HTTPException) as error:
-        review_record(application_engine, record_id, 2, "APPROVED", registration=fake)
-    assert error.value.status_code == code
+    calls = fake.calls
+    review_record(application_engine, record_id, 2, "APPROVED", registration=fake)
+    assert fake.calls == calls
     with Session(application_engine) as db:
-        assert db.get(CreatorApplication, record_id).status == "ON_REVIEW"
-        assert db.scalar(select(func.count()).select_from(Badge)) == 0
-        assert db.scalar(select(func.count()).select_from(NotificationOutbox)) == 0
+        assert db.get(CreatorApplication, record_id).status == "APPROVED"
+        assert db.scalar(select(func.count()).select_from(Badge)) == 1
+        assert db.scalar(select(func.count()).select_from(NotificationOutbox)) == 1
 
 
 def test_rejection_reason_reopen_stale_review_and_self_review(application_engine):
@@ -533,23 +543,16 @@ def test_boundaries():
     assert not workflow.window_open(event, now - timedelta(seconds=1))
 
 
-def test_outside_transaction_lookup_and_role_recheck(application_engine):
+def test_approval_still_requires_current_admin_role(application_engine):
     record_id = submit_record(application_engine)
     review_record(application_engine, record_id, 1, "ON_REVIEW")
     with Session(application_engine) as db:
         fake = RegistrationFake()
 
-        def revoke():
-            assert not db.in_transaction()
-            with Session(application_engine) as other:
-                other.execute(
-                    delete(LocalRoleAssignment).where(
-                        LocalRoleAssignment.role == "ADMIN"
-                    )
-                )
-                other.commit()
-
-        fake.hook = revoke
+        db.execute(
+            delete(LocalRoleAssignment).where(LocalRoleAssignment.role == "ADMIN")
+        )
+        db.commit()
         with pytest.raises(HTTPException) as error:
             asyncio.run(
                 workflow.review(
@@ -639,9 +642,7 @@ def test_postgres_concurrent_submits_and_approvals(postgres_engine, monkeypatch)
         fake.hook = lambda: barrier.wait(timeout=10)
         with Session(postgres_engine) as db:
             return asyncio.run(
-                workflow.submit(
-                    db, 911, input_data(), fake, IdentityFake(), **picture_input()
-                )
+                workflow.submit(db, 911, input_data(), fake, IdentityFake())
             )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -653,12 +654,12 @@ def test_postgres_concurrent_submits_and_approvals(postgres_engine, monkeypatch)
         event_images = db.scalars(
             select(ProfileImage).where(ProfileImage.event_id == 910)
         ).all()
-        assert len(event_images) == 1 and event_images[0].state == "ACTIVE"
+        assert event_images == []  # Submission no longer stages images.
     review_record(postgres_engine, ids[0], 1, "ON_REVIEW", actor=910)
 
     def approve_once(_):
         fake = RegistrationFake()
-        fake.hook = lambda: barrier.wait(timeout=10)
+        barrier.wait(timeout=10)
         try:
             review_record(
                 postgres_engine, ids[0], 2, "APPROVED", actor=910, registration=fake

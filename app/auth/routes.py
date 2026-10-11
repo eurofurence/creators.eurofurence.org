@@ -21,6 +21,7 @@ from app.auth.dependencies import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.identity.models import LocalUser
+from app.identity.profile import IdentityProfileClient, get_identity_profile_client
 from app.identity.service import resolve_user
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,9 @@ async def login(request: Request) -> RedirectResponse:
 
 @router.get("/callback", name="auth_callback")
 async def callback(
-    request: Request, db: Annotated[Session, Depends(get_db)]
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    identity: Annotated[IdentityProfileClient, Depends(get_identity_profile_client)],
 ) -> RedirectResponse:
     try:
         require_configuration()
@@ -107,9 +110,17 @@ async def callback(
             request, 503, "Identity provider unavailable"
         ) from None
 
+    intent = request.session.get("registration_verification")
     request.session.clear()
     try:
         user = resolve_user(db, issuer, subject)
+        if intent and (user.id, user.session_key) != (
+            intent.get("user_id"),
+            intent.get("identity_key"),
+        ):
+            raise authentication_error(
+                request, 401, "Sign in with the same account to verify Registration"
+            )
     except SQLAlchemyError:
         db.rollback()
         raise authentication_error(
@@ -117,6 +128,16 @@ async def callback(
         ) from None
     request.session["user_id"] = user.id
     request.session["identity_key"] = user.session_key
+    if intent:
+        # This same-account round trip must not invalidate an already open form.
+        # Normal login/account changes still clear CSRF and all prior session state.
+        if isinstance(intent.get("form_csrf"), str):
+            request.session["csrf"] = intent["form_csrf"]
+        from app.auth.verification import complete_verification
+
+        return await complete_verification(
+            request, db, user.id, intent, token, identity
+        )
     return RedirectResponse("/", status_code=303)
 
 

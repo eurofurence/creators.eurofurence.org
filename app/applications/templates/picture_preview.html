@@ -1,3 +1,4 @@
 {% if has_picture %}
-<figure class="picture-preview"><img src="/creators/{{ record.id }}/picture" alt="Current application and creator profile picture" width="200" height="200"><figcaption>This picture is used for your application, badge and public profile when published.</figcaption></figure>
-{% else %}<p role="alert">No picture has been supplied. Upload your picture before review or printing; PNG, exactly 600×600 pixels, maximum {{ '%g'|format(upload_limit_mib) }} MiB.</p>{% endif %}
+<figure class="picture-preview"><img src="/creators/{{ record.id }}/picture" alt="Current creator profile picture" width="200" height="200"><figcaption>This picture is used for your badge and public profile when published.</figcaption></figure>
+{% elif record.status == 'APPROVED' %}<p role="alert">No valid profile picture has been supplied. Complete the approved Creator profile with a PNG, exactly 600×600 pixels, maximum {{ '%g'|format(upload_limit_mib) }} MiB. Gallery visibility and badge printing require this picture. If editing is locked, contact an administrator.</p>
+{% else %}<p>A profile picture is requested after approval. It is not required for the application decision.</p>{% endif %}

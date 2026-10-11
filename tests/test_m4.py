@@ -31,7 +31,7 @@ from app.main import app
 from app.moderation import service as moderation
 from app.notifications import client as notification_client
 from app.notifications import worker
-from app.registration.client import RegistrationStatus, RegistrationUnavailable
+from app.registration.models import RegistrationVerification
 from app.staff import exports, service
 
 application_engine = m2.application_engine
@@ -167,7 +167,6 @@ def test_rejection_intents_deliver(application_engine, target):
                 m2.input_data(),
                 m2.RegistrationFake(),
                 m2.IdentityFake(),
-                **m2.picture_input(),
             )
         )
         if target == "NOT_APPROVED":
@@ -315,7 +314,7 @@ def test_print_rows_operations_and_no_secrets(application_engine):
             f"creator1-{app_id}.png",
         )
         assert rows[2] == (2, *rows[1][1:])
-        assert registration.calls == 2
+        assert registration.calls == 0
         assert {
             "Event",
             "Applications",
@@ -348,9 +347,9 @@ def test_print_rows_operations_and_no_secrets(application_engine):
 @pytest.mark.parametrize(
     "failure",
     [
-        "INELIGIBLE",
-        "UNAVAILABLE",
-        "UNKNOWN",
+        "missing_evidence",
+        "mismatched_identity",
+        "mismatched_reg_id",
         "missing_name",
         "missing_image",
         "missing_object",
@@ -364,12 +363,16 @@ def test_print_validation_blocks_without_workflow_changes(application_engine, fa
         helper_id = m3.register(db, app_id)
         m3.decide(db, helper_id)
         registration = m2.RegistrationFake()
-        if failure == "INELIGIBLE":
-            registration.status = RegistrationStatus.INELIGIBLE
-        elif failure == "UNAVAILABLE":
-            registration.failure = RegistrationUnavailable()
-        elif failure == "UNKNOWN":
-            registration.status = RegistrationStatus.UNKNOWN
+        if failure == "missing_evidence":
+            db.execute(delete(RegistrationVerification))
+        elif failure == "mismatched_identity":
+            db.scalar(
+                select(RegistrationVerification).where(
+                    RegistrationVerification.purpose == "creator"
+                )
+            ).subject = "different-person"
+        elif failure == "mismatched_reg_id":
+            db.get(CreatorApplication, app_id).reg_id = "WRONG"
         elif failure == "missing_name":
             db.get(CreatorProfile, app_id).channel_name = ""
         elif failure == "missing_image":
@@ -413,7 +416,9 @@ def test_inactive_print_exclusion_preserves_operations(application_engine):
         assert result["Applications"].max_row == 2
 
 
-def test_export_revalidates_changes_and_admin_revocation(application_engine):
+def test_export_revalidates_changes_and_admin_revocation(
+    application_engine, monkeypatch
+):
     with Session(application_engine, expire_on_commit=False) as db:
         app_id, store = complete_creator(db)
         registration = m2.RegistrationFake()
@@ -424,7 +429,14 @@ def test_export_revalidates_changes_and_admin_revocation(application_engine):
                 other.get(CreatorProfile, app_id).channel_name = "Changed during lookup"
                 other.commit()
 
-        registration.hook = change
+        original_get = store.get
+
+        def get_changed(key):
+            result = original_get(key)
+            change()
+            return result
+
+        monkeypatch.setattr(store, "get", get_changed)
         with pytest.raises(HTTPException, match="changed during verification"):
             run(exports.export(db, 2, 1, registration, store))
 
@@ -435,7 +447,12 @@ def test_export_revalidates_changes_and_admin_revocation(application_engine):
                 )
                 other.commit()
 
-        registration.hook = revoke
+        def get_revoked(key):
+            result = original_get(key)
+            revoke()
+            return result
+
+        monkeypatch.setattr(store, "get", get_revoked)
         with pytest.raises(HTTPException) as error:
             run(exports.export(db, 2, 1, registration, store))
         assert error.value.status_code == 403
@@ -877,7 +894,7 @@ def test_secondary_channel_never_drives_print_row(application_engine):
 
 
 def test_ban_forms_failed_notification_page_and_export_problem_ui(browser):
-    client, registration, engine = browser
+    client, _, engine = browser
     with Session(engine, expire_on_commit=False) as db:
         app_id, store = complete_creator(db)
         run(
@@ -931,7 +948,9 @@ def test_ban_forms_failed_notification_page_and_export_problem_ui(browser):
         == 200
     )
     assert "PROVIDER_UNAVAILABLE" in client.get("/admin/notifications").text
-    registration.failure = RegistrationUnavailable()
+    with Session(engine) as db:
+        db.execute(delete(RegistrationVerification))
+        db.commit()
     response = client.post(
         "/admin/events/1/export",
         data={
@@ -941,7 +960,7 @@ def test_ban_forms_failed_notification_page_and_export_problem_ui(browser):
     )
     assert (
         response.status_code == 409
-        and "UNAVAILABLE" in response.text
+        and "Registration verification is missing" in response.text
         and "Badge 1" in response.text
     )
     assert "no-store" in response.headers["cache-control"]

@@ -22,14 +22,13 @@ from app.applications.models import (
     NotificationOutbox,
 )
 from app.applications.security import require_admin
-from app.applications.service import registration_lookup_for_user
 from app.applications.workflow import utc
 from app.creators.images import ImageStorageUnavailable, normalize_png
 from app.creators.models import CreatorProfile, ProfileImage
 from app.creators.policy import creator_active, helper_active
 from app.helpers.models import HelperInvitation, HelperRegistration
 from app.moderation.service import warnings
-from app.registration.eligibility import Eligibility, check_eligibility
+from app.registration.evidence import MISSING_EVIDENCE, record_verified
 from app.staff.service import event_record
 
 PRINT_COLUMNS = ("NUMBER", "NAME", "ICON", "LINK", "PICTURE")
@@ -124,7 +123,12 @@ def snapshot(db, event_id):
                 "object_key": image.object_key
                 if image and image.state == "ACTIVE"
                 else None,
-                "lookup": registration_lookup_for_user(db, user_id, event_id=event_id),
+                "registration_verified": record_verified(
+                    db,
+                    helper if helper is not None else application,
+                    "helper" if helper is not None else "creator",
+                )
+                and record_verified(db, application, "creator"),
             }
         )
     candidates.sort(
@@ -303,20 +307,20 @@ async def validate_print(candidates, registration, store):
     problems = []
     checked_images = {}
     for row in candidates:
-        eligibility = (
-            await check_eligibility(registration, row["lookup"])
-            if row["lookup"]
-            else Eligibility.UNAVAILABLE
-        )
-        if eligibility is not Eligibility.ELIGIBLE:
-            problems.append(problem(row, eligibility.value))
+        if not row["registration_verified"]:
+            problems.append(problem(row, MISSING_EVIDENCE))
         missing = [
-            key
-            for key in ("number", "name", "platform", "link", "image_id")
-            if not row[key]
+            key for key in ("number", "name", "platform", "link") if not row[key]
         ]
         if missing:
             problems.append(problem(row, "Missing " + ", ".join(missing)))
+        if not row["image_id"]:
+            problems.append(
+                problem(
+                    row,
+                    "Profile picture missing. Upload a valid PNG in the approved Creator profile before printing.",
+                )
+            )
         if row["object_key"]:
             key = row["object_key"]
             if key not in checked_images:

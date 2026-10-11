@@ -160,6 +160,14 @@ def normalize_channel(platform: str, original: str, primary: bool) -> ChannelInp
     return ChannelInput(platform, original, account, canonical, primary)
 
 
+def validate_channels(channels: tuple[ChannelInput, ...]) -> None:
+    if sum(c.is_primary for c in channels) != 1:
+        raise ValueError("Choose exactly one primary publication channel.")
+    accounts = [(c.platform, c.normalized_account) for c in channels]
+    if len(set(accounts)) != len(accounts):
+        raise ValueError("Each publication account may only be listed once.")
+
+
 @dataclass(frozen=True)
 class ApplicationInput:
     content_types: tuple[str, ...]
@@ -169,11 +177,9 @@ class ApplicationInput:
     def validate(self) -> None:
         if not self.content_types or not set(self.content_types) <= set(CONTENT_TYPES):
             raise ValueError("Choose at least one planned content type.")
-        if sum(c.is_primary for c in self.channels) != 1:
-            raise ValueError("Choose exactly one primary publication channel.")
-        accounts = [(c.platform, c.normalized_account) for c in self.channels]
-        if len(set(accounts)) != len(accounts):
-            raise ValueError("Each publication account may only be listed once.")
+        validate_channels(self.channels)
+        if not self.videos:
+            raise ValueError("Provide at least one existing convention video URL.")
         if len(self.videos) > 10:
             raise ValueError("Provide at most 10 convention video URLs.")
         for video in self.videos:
@@ -230,8 +236,8 @@ def parse_videos(form) -> tuple[str, ...]:
 def parse_application(
     form, existing: ApplicationInput | None = None
 ) -> ApplicationInput:
-    # Omission in a partial edit preserves a section. Explicit empty controls clear
-    # optional data or trigger validation; unchecking every content type is invalid.
+    # Omission in a partial edit preserves a section. Explicit empty controls must
+    # still satisfy the required content, channel and video evidence rules.
     channels = (
         existing.channels
         if existing

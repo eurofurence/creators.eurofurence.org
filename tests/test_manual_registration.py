@@ -7,6 +7,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
+import test_applications as m2
 from pydantic import ValidationError
 
 from app.config import Settings, settings
@@ -174,12 +175,27 @@ def test_browser_uses_selected_provider_and_retryable_failure(
     monkeypatch.setattr(settings, "registration_provider", "manual_test")
     monkeypatch.setattr(settings, "registration_manual_file", path)
     app.dependency_overrides.pop(get_registration_client)
-    response = client.get("/applications/eligibility")
-    assert response.json() == {"status": "ELIGIBLE", "retryable": False}
+    assert client.get("/applications/eligibility").status_code == 503
+    write_records(path, "UNKNOWN")
+    page = "/auth/registration?purpose=creator"
+    response = client.post(
+        "/auth/registration",
+        data={"csrf_token": m2.csrf(client, page), "purpose": "creator"},
+    )
+    assert "verification is unavailable" in response.text
+    assert client.get("/applications/eligibility").json() == {
+        "status": "UNAVAILABLE",
+        "retryable": True,
+    }
+    write_records(path)
+    response = client.post(
+        "/auth/registration",
+        data={"csrf_token": m2.csrf(client, page), "purpose": "creator"},
+    )
+    assert "Registration verified" in response.text
     write_records(path, "UNKNOWN")
     response = client.get("/applications/eligibility")
-    assert response.status_code == 503
-    assert response.json() == {"status": "UNAVAILABLE", "retryable": True}
+    assert response.json() == {"status": "ELIGIBLE", "retryable": False}
     assert response.headers["cache-control"] == "no-store"
     client.cookies.clear()
     assert client.get("/applications/eligibility").status_code == 401

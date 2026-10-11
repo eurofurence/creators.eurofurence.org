@@ -13,7 +13,7 @@ from app import storage
 from app.applications.workflow import utc
 from app.config import settings
 from app.creators.models import CreatorProfile, ProfileImage
-from app.creators.service import picture_context
+from app.creators.service import profile_context
 from app.events.models import Event
 from app.helpers.service import record_change, touch
 
@@ -139,14 +139,14 @@ def discard_staged_picture(db, store, image_id):
 
 def replace_picture(db, actor_id, application_id, version, data, store, **policy):
     def context():
-        return picture_context(db, actor_id, application_id, version=version, **policy)[
+        return profile_context(db, actor_id, application_id, version=version, **policy)[
             0
         ]
 
     image_id = stage_picture(db, data, store, context)
     try:
         with db.begin():
-            event, application, profile = picture_context(
+            event, application, profile = profile_context(
                 db, actor_id, application_id, version=version, **policy
             )
             attach_picture(db, profile, image_id, event.id)

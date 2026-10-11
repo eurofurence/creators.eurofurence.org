@@ -5,6 +5,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
 from sqlalchemy import create_engine, select
@@ -15,6 +16,7 @@ from app.config import settings
 from app.database import Base, get_db
 from app.events.models import Event
 from app.identity.models import ExternalIdentity, LocalUser
+from app.identity.profile import UnavailableIdentityProfileClient
 from app.main import app
 from app.registration.client import (
     RegistrationLookup,
@@ -29,6 +31,7 @@ from app.registration.eligibility import (
     check_eligibility,
     require_eligible_registration,
 )
+from app.registration.evidence import verify_participant
 
 
 class FakeRegistrationClient:
@@ -44,7 +47,7 @@ class FakeRegistrationClient:
         self.calls.append(lookup)
         if self.failure:
             raise self.failure
-        return RegistrationResult(self.result_lookup or lookup, self.status)
+        return RegistrationResult(self.result_lookup or lookup, self.status, "REG-123")
 
 
 LOOKUP = RegistrationLookup("https://identity.example/", "person-123", 7, 2028)
@@ -87,7 +90,7 @@ def test_wrong_person_or_event_never_grants_eligibility(change):
     assert asyncio.run(check_eligibility(client, LOOKUP)) is Eligibility.UNAVAILABLE
 
 
-def test_each_guard_call_rechecks_instead_of_trusting_earlier_eligibility():
+def test_low_level_guard_reads_current_provider_result():
     client = FakeRegistrationClient()
     asyncio.run(require_eligible_registration(client, LOOKUP))
     client.status = RegistrationStatus.INELIGIBLE
@@ -159,19 +162,34 @@ def eligibility_setup(monkeypatch):
         (RegistrationStatus.UNKNOWN, "UNAVAILABLE", 503),
     ],
 )
-def test_authenticated_endpoint_is_private_and_bound_to_configured_event(
+def test_status_endpoint_is_private_and_never_starts_verification(
     eligibility_setup, status, expected, code
 ):
     client, adapter, db = eligibility_setup
     adapter.status = status
+    if expected == "ELIGIBLE":
+        asyncio.run(
+            verify_participant(
+                db, 1, "creator", adapter, UnavailableIdentityProfileClient()
+            )
+        )
+    else:
+        with pytest.raises(HTTPException):
+            asyncio.run(
+                verify_participant(
+                    db, 1, "creator", adapter, UnavailableIdentityProfileClient()
+                )
+            )
     response = client.get(
         "/applications/eligibility?user_id=999&event_id=999&status=paid"
     )
-    assert response.status_code == code
-    assert response.json() == {"status": expected, "retryable": code == 503}
+    assert response.status_code == (200 if expected == "ELIGIBLE" else 503)
+    assert response.json() == {
+        "status": "ELIGIBLE" if expected == "ELIGIBLE" else "UNAVAILABLE",
+        "retryable": expected != "ELIGIBLE",
+    }
     assert response.headers["cache-control"] == "no-store"
     assert adapter.calls == [LOOKUP]
-    # Only local identity was stored: name, email and check-in are not prerequisites.
     assert db.get(LocalUser, 1) is not None
 
 

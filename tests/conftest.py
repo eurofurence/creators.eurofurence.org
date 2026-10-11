@@ -4,6 +4,7 @@ import os
 os.environ.update(
     ENVIRONMENT="development",
     REGISTRATION_PROVIDER="unavailable",
+    REGISTRATION_V1_EVENTS="[]",
     SESSION_SECRET="test-session-secret-at-least-32-characters",
     DATABASE_URL="sqlite://",
     OIDC_CLIENT_ID="test-client",

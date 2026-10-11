@@ -206,20 +206,14 @@ async def picture(
         )
         return render(
             request,
-            "creator.html" if context["record"].status == "APPROVED" else "form.html",
+            "creator.html",
+            submitted=form,
             error=error.detail,
             status_code=error.status_code,
             **context,
         )
     finally:
         await form.close()
-    if db.get(CreatorApplication, application_id).status != "APPROVED":
-        return RedirectResponse(
-            f"/admin/applications/{application_id}"
-            if policy(form)["administrative"]
-            else "/applications",
-            status_code=303,
-        )
     return return_to_creator(application_id, policy(form)["administrative"])
 
 

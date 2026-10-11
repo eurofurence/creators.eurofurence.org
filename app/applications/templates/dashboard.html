@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}<h1>Your creator application — {{ event.name }}</h1>
+<p><a href="/auth/registration?purpose=creator">Registration verification</a>: verified once for your application and this event. Retry here if verification was unavailable or payment was pending.</p>
 {% if record %}{% include "details.html" %}<h2>Next steps</h2>
 <p><a href="/creators/{{ record.id }}">Creator profile, helpers and participation</a></p>{% if record.withdrawn_at %}<p>Your creator participation is withdrawn. Only an administrator can restore it.</p>{% endif %}
 {% if record.status == 'APPROVED' and not has_picture %}<p><a href="/creators/{{ record.id }}#picture-upload">Upload your badge and profile picture</a>. Printing remains blocked until a valid picture is supplied.</p>{% endif %}

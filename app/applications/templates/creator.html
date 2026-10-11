@@ -13,7 +13,7 @@
 <h2>Public creator name</h2><p>{{ profile.channel_name if profile and profile.channel_name else 'Not yet supplied' }}</p>
 <h2>Publication channels</h2><ul>{% for channel in channels %}<li>{{ platform_labels[channel.platform] }}: <a href="{{ channel.canonical_url }}" rel="noopener noreferrer">{{ channel.original_representation }}</a>{{ ' (primary — badge link)' if channel.is_primary }}</li>{% endfor %}</ul>
 {% endif %}
-<h2>Current application and profile picture</h2>
+<h2>Current profile picture</h2>
 {% include "picture_preview.html" %}
 {% if record.status != 'APPROVED' %}<p><a href="/applications">Return to your application</a> to check review status and available editing options.</p>{% endif %}
 {% for ban in banned %}<p role="alert">Banned-account warning: {{ ban.platform }} / {{ ban.normalized_account }} — {{ ban.private_reason }}. Approval is not automatically changed.</p>{% endfor %}
@@ -24,7 +24,7 @@
 <p>Saving your profile keeps your picture, planned content and convention video links.</p>
 {% include "admin_policy.html" %}<button>Save profile</button></form>
 <h2 id="picture-upload">{{ 'Replace' if has_picture else 'Upload' }} picture</h2>
-<p>Save any profile text changes above first. This separate action updates the application, badge and public profile picture together.</p>
+<p>Complete your approved Creator profile by uploading your picture. Save any profile text changes above first. This separate action updates the badge and public profile picture together.</p>
 <form method="post" enctype="multipart/form-data" action="/creators/{{ record.id }}/picture">{{ csrf.csrf_token }}<input type="hidden" name="version" value="{{ record.version }}">{% include "picture_input.html" %}{% include "admin_policy.html" %}<button>{{ 'Replace picture' if has_picture else 'Upload picture' }}</button></form>
 {% endif %}
 <h2>Invitations</h2><p>Links are single-use and shown once. Resend to replace a lost unused link.</p>

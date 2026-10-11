@@ -18,6 +18,7 @@ from app.creators.models import ProfileImage
 from app.events.models import Event
 from app.helpers.models import HelperRegistration
 from app.identity.models import ExternalIdentity, LocalUser
+from app.registration.models import RegistrationVerification
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ def delete_unneeded_users(db):
             .where(
                 ~exists().where(CreatorApplication.user_id == LocalUser.id),
                 ~exists().where(HelperRegistration.user_id == LocalUser.id),
+                ~exists().where(RegistrationVerification.user_id == LocalUser.id),
                 ~exists().where(NotificationOutbox.recipient_id == LocalUser.id),
                 ~exists().where(
                     (LocalRoleAssignment.user_id == LocalUser.id)

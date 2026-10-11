@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from starlette.datastructures import FormData, UploadFile
+from starlette.datastructures import FormData
 
 from app.applications import workflow
 from app.applications.input import (
@@ -27,7 +27,6 @@ from app.applications.models import (
 from app.applications.security import csrf_form, protected_form, require_admin
 from app.auth.dependencies import get_current_user
 from app.config import settings
-from app.creators import images
 from app.creators.models import CreatorProfile, ProfileImage
 from app.database import get_db
 from app.identity.models import LocalUser
@@ -41,7 +40,6 @@ DB = Annotated[Session, Depends(get_db)]
 User = Annotated[LocalUser, Depends(get_current_user)]
 Registration = Annotated[RegistrationClient, Depends(get_registration_client)]
 Identity = Annotated[IdentityProfileClient, Depends(get_identity_profile_client)]
-Store = Annotated[images.ImageStore, Depends(images.get_image_store)]
 
 
 def form_values(context):
@@ -201,8 +199,8 @@ async def save_application(
     user: User,
     registration: Registration,
     identity: Identity,
-    store: Store,
 ):
+    # Accept bounded legacy multipart forms only to explain the moved upload step.
     form = await protected_form(request, upload=True)
     try:
         user_id = user.id
@@ -214,6 +212,10 @@ async def save_application(
                 if form.get("application_id")
                 else None,
             )
+            if form.get("picture") is not None:
+                raise ValueError(
+                    "Upload your profile picture from your Creator profile after approval."
+                )
         except ValueError as error:
             record = workflow.application_for_user(
                 db, user_id, settings.active_event_id
@@ -238,20 +240,12 @@ async def save_application(
                     data,
                 )
             else:
-                file = form.get("picture")
-                picture = (
-                    await file.read(settings.profile_image_max_bytes + 1)
-                    if isinstance(file, UploadFile)
-                    else None
-                )
                 await workflow.submit(
                     db,
                     user_id,
                     data,
                     registration,
                     identity,
-                    picture=picture,
-                    store=store,
                 )
         except HTTPException as error:
             if error.status_code not in (409, 413, 422, 503):

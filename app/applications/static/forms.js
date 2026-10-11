@@ -58,7 +58,9 @@ if (videoLinks) {
     event.target.closest('.video-link').remove();
     numberVideos();
     addVideo.focus();
-    feedback.textContent = 'Link removed from this form. Save changes to apply the removal.';
+    feedback.textContent = videoLinks.children.length
+      ? 'Link removed from this form. At least one valid link must remain when saving.'
+      : 'At least one existing convention video URL is required. Add a link before saving.';
   });
   numberVideos();
 }

@@ -10,6 +10,7 @@ from app.database import Base
 from app.events.models import Event  # noqa: F401
 from app.helpers import models as helper_models  # noqa: F401
 from app.identity.models import ExternalIdentity, LocalUser  # noqa: F401
+from app.registration.models import RegistrationVerification  # noqa: F401
 
 config = context.config
 

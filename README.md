@@ -4,10 +4,11 @@ A server-rendered application for Eurofurence Video Creator applications,
 review, creator profiles, helpers, badges and pickup. It also provides a public
 creator gallery/API and administrative exports.
 
-**Development milestone, not a production release.** Real EF OIDC is supported;
-live Registration, trusted identity profile data and notification delivery still
-need EF contracts and adapters. Local acceptance testing uses explicit manual
-Registration records.
+**Development milestone, not a production release.** Real EF OIDC and a configurable
+Registration v1 adapter are implemented. Registration still needs verified event
+routing, identity mapping and approved access before production activation. Trusted
+identity profile data and notification delivery still need adapters and live
+verification. Local acceptance testing can use explicit manual Registration records.
 
 ## Prerequisites and installation
 
@@ -61,8 +62,9 @@ exist**. Configure it privately; environment variables override this file.
 | `OIDC_*` | Approved client ID/secret, issuer, discovery URL and exact registered redirect URI |
 | `OIDC_REDIRECT_URI` | Normally `http://127.0.0.1:8000/auth/callback` for this host setup |
 | `ACTIVE_EVENT_ID` | Existing local Event ID; no calendar-year fallback |
-| `REGISTRATION_PROVIDER` | `manual_test` for explicit local fixtures; otherwise `unavailable` until a real adapter exists |
+| `REGISTRATION_PROVIDER` | `unavailable` by default; `manual_test` for local fixtures; `v1` for explicitly configured EF Registration access |
 | `REGISTRATION_MANUAL_FILE` | Private ignored JSON path, for example `temp/manual-registration.json` |
+| `REGISTRATION_V1_EVENTS` | JSON array of event routes and secret credentials; defaults to `[]`. See the configuration below |
 | `NOTIFICATION_PROVIDER_FACTORY` | Leave unset locally; no real transport is bundled |
 
 The current OIDC client requests only `openid`. Open the same origin as the
@@ -101,6 +103,53 @@ keeps them intact but does not apply changed ports, images or mounts. Before
 applying Compose changes, inspect `docker compose ps` and the S3 container's
 mounts; back up/transfer its objects or complete an approved domain reset first.
 Never recreate an old unmounted S3 container while retaining its DB references.
+
+### Registration v1
+
+`REGISTRATION_PROVIDER=v1` uses the published attendee identity, details and status
+endpoints. Each `REGISTRATION_V1_EVENTS` entry contains `event_id`, `event_year`,
+the full HTTPS `base_url` (including its API prefix), exact OIDC `issuer`,
+`auth_method` (`api_key`, `bearer` or `user_bearer`). Service modes require a secret
+`credential`; user-token mode requires it to be absent. Obtain the URL and approved
+access from EF. No user access or refresh token is persisted.
+
+The `identity_mapping` field defaults to `unconfirmed`. Set it to
+`confirmed_oidc_subject` only after EF confirms that this issuer's verified OIDC
+subject is the Registration identity for service lookup. User-token mode instead
+requires `confirmed_user_token`, attesting to the API ownership binding of the
+fresh OAuth token; it does not put OIDC `sub` into a Registration identity URL. Outside
+`development`, `test` and `staging`, each route also requires
+`production_verified=true`, attesting to verified deployment, mapping and access.
+Keep this false until acceptance testing succeeds; no production route is bundled.
+
+Only `paid` and `checked in` are eligible. Unknown statuses, missing or ambiguous
+registrations, mismatched events/identities and provider failures remain unavailable.
+API keys require EF approval for the intended network/deployment; bearer token
+provisioning and rotation are operator responsibilities. The adapter does not
+mint service tokens or refresh user tokens. In `user_bearer` mode, the participant
+opens Registration verification from the application/helper page and authorizes a
+fresh OIDC grant. The callback uses that access token for self lookup and discards
+it; normal login performs no Registration lookup. OIDC still requests only
+`openid`; required live permissions/scopes and attendee-detail access need EF
+confirmation.
+
+### One-time eligibility evidence
+
+Creator eligibility is verified during the initial application process. Helper
+eligibility is verified separately when that user joins the Helper program for the
+same Event; multiple helper relationships reuse that Helper evidence. Only `paid`
+or `checked in`, a valid Reg-ID and verified identity/event binding succeed.
+Unavailable/ineligible attempts can be retried and never create successful evidence.
+Approval, invitations, helper decisions, restoration and print exports use stored
+evidence, without another Registration call. `/applications/eligibility` only reads
+stored Creator verification. Other authorization, deadlines and print checks remain.
+
+Apply migration `7d3e91a4b620` before running this version. It adds event-owned
+verification evidence without rewriting existing applications, images or badges.
+Legacy records lack an explicit verified identity/status binding: participants must
+use the Registration verification page once before approval/restoration/printing
+can rely on them. No proof is inferred or backfilled. Tokens are never stored;
+evidence is removed with Event/user cleanup. No production settings are activated.
 
 ### Manual Registration
 
@@ -152,18 +201,20 @@ Open **http://127.0.0.1:8000/**. Login and CSRF-protected POST logout return to 
 `/health` checks the process; `/ready` checks DB connectivity only. `/docs` is the
 OpenAPI reference.
 
-- `/applications`: submission, current picture and workflow status.
+- `/applications`: submission and workflow status; picture upload follows approval.
 - `/admin/applications`: ADMIN review. Review errors preserve entered notes.
 - Creator profile links: public name, channels, pictures, invitations and participation.
 - `/helpers`: the signed-in user's helper relationships.
 - `/staff`: authorized Event selection, stored Reg-ID lookup and pickup.
 - `/gallery/YEAR` and `/api/v1/events/YEAR/creators`: publicly visible creators.
 
-The submitted PNG must be exactly 600×600 pixels and at most
-`PROFILE_IMAGE_MAX_BYTES` (default 10 MiB). It is decoded/re-encoded and remains
-the current picture through approval. Uploading a replacement is a separate
-action. Complete the public creator name after approval before publication or
-printing. Print checks still require real assets and current eligibility.
+Applications and review do not require a picture. After approval, complete the
+Creator profile with a public name and the same profile picture used on the primary
+publication channel. The PNG must be exactly 600×600 pixels and at most
+`PROFILE_IMAGE_MAX_BYTES` (default 10 MiB); it is securely decoded/re-encoded.
+Gallery visibility and print readiness require an active picture. Existing images
+remain attached, and replacement remains a separate action. Print checks still
+require real assets and matching stored eligibility evidence.
 
 Stop Uvicorn with **Ctrl+C**. For normal pauses use:
 
@@ -219,7 +270,7 @@ Existing migration revisions are excluded from Ruff formatting checks.
 | Symptom | Check |
 | --- | --- |
 | Login unavailable or callback fails | Safe diagnostics, exact callback origin, approved credentials and issuer; never enable callback query logging |
-| Eligibility unavailable | Active Event, fixture path, issuer/subject and Event ID/year; production has no manual fallback |
+| Eligibility unavailable | Active Event, selected provider, exact issuer and Event ID/year; for v1, verify the route, approved credential, identity mapping and production verification flag; for manual testing, check the fixture path |
 | Approved creator absent from gallery or print blocked | Public name, current valid image, primary channel, visibility, participation and retention; do not bypass print validation |
 | Stored picture unavailable | S3 running, correct bucket/endpoint and retained object; an empty replacement container does not repair DB references |
 | Reg-ID lookup empty | Search the stored attendee Reg-ID, not the separate badge number; check Event scope |

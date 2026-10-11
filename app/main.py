@@ -11,6 +11,7 @@ from app.applications.pages import router as pages_router
 from app.applications.pages import static as application_static
 from app.applications.routes import router as applications_router
 from app.auth.routes import router as auth_router
+from app.auth.verification import router as verification_router
 from app.config import settings
 from app.creators.pages import router as creators_router
 from app.gallery.pages import router as gallery_router
@@ -49,6 +50,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(verification_router)
 app.include_router(applications_router)
 app.include_router(pages_router)
 app.include_router(creators_router)
