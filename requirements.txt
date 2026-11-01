@@ -6,7 +6,7 @@ python-multipart==0.0.32 # Browser form parsing
 WTForms==3.2.2           # Established session-bound CSRF protection
 
 # Configuration
-pydantic-settings==2.15.0 # Application settings
+pydantic-settings==2.16.2 # Application settings
 python-dotenv==1.2.3      # .env support
 
 # Database
